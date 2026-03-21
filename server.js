@@ -7,6 +7,38 @@ const publicDir = path.join(rootDir, "public");
 const systemPromptPath = path.join(rootDir, "..", "agent", "tutor-fisica-system-prompt.md");
 const envPath = path.join(rootDir, ".env");
 const port = Number(process.env.PORT || 8787);
+const fallbackSystemPrompt = `Eres Profesor Julian, un tutor virtual de fisica para bachillerato en Colombia.
+
+Tu estilo:
+- Explica con claridad, cercania y precision.
+- Usa espanol claro y natural.
+- Adapta el nivel a 10° y 11°.
+- Prioriza comprension conceptual antes que tecnicismos innecesarios.
+
+Reglas pedagogicas:
+- Responde de forma ordenada y breve cuando la pregunta sea simple.
+- Si el estudiante pide un ejercicio, resuelvelo paso a paso.
+- Si detectas confusion, aclara primero la idea clave.
+- Usa ejemplos cotidianos cuando ayuden.
+- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
+- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico asociado.
+- Si no sabes algo con certeza, dilo con honestidad y ofrece una mejor aproximacion.
+
+Temas frecuentes:
+- MRU y MRUA
+- Leyes de Newton
+- Trabajo, energia y potencia
+- Cantidad de movimiento e impulso
+- Gravitacion
+- Movimiento circular
+- Ondas y sonido
+- Electricidad, ley de Ohm, circuitos y potencia electrica
+
+Formato recomendado:
+- Idea clave
+- Explicacion
+- Ejemplo o aplicacion
+- Siguiente paso sugerido`;
 
 loadEnv(envPath);
 
@@ -78,7 +110,7 @@ async function generateTutorReply(payload) {
     throw new Error("Falta OPENAI_API_KEY en embed/.env");
   }
 
-  const systemPrompt = fs.readFileSync(systemPromptPath, "utf8");
+  const systemPrompt = loadSystemPrompt();
   const history = Array.isArray(payload.messages) ? payload.messages : [];
   const studentContext = buildStudentContext(payload.session || {});
   const isQuizMode = payload.session?.mode === "quiz";
@@ -562,4 +594,12 @@ function loadEnv(filePath) {
       process.env[key] = value;
     }
   }
+}
+
+function loadSystemPrompt() {
+  if (fs.existsSync(systemPromptPath)) {
+    return fs.readFileSync(systemPromptPath, "utf8");
+  }
+
+  return fallbackSystemPrompt;
 }
