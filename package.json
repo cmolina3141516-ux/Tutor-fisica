@@ -1,0 +1,13 @@
+{
+  "name": "tutor-fisica-virtual-planet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tutor de fisica embebible para Virtual Planet",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

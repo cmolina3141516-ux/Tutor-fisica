@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tutor de Fisica Embebible</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Source+Serif+4:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Tutor IA de Fisica</p>
+          <h1 id="heroTitle">Profesor Julián</h1>
+          <p class="lead">
+            Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.
+          </p>
+          <p class="hero-quote">
+            <em>"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"</em>
+            <span>CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.</span>
+          </p>
+          <section class="session-timer" id="sessionTimer" aria-live="polite">
+            <div class="session-timer-copy">
+              <p class="session-kicker">Tiempo de trabajo</p>
+              <span id="timerHint">Dispones de 15 minutos para trabajar con el avatar.</span>
+            </div>
+            <div class="timer-track" aria-hidden="true">
+              <div class="timer-fill" id="timerFill"></div>
+            </div>
+          </section>
+        </div>
+        <div class="hero-portrait">
+          <div class="portrait-glow"></div>
+          <img src="https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png" alt="Avatar del profesor de fisica" />
+          <div class="avatar-closed-overlay" id="avatarClosedOverlay" hidden>
+            <strong>Sesión finalizada</strong>
+            <span>El avatar se ha cerrado. Inicia una nueva sesión para continuar.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card workspace">
+        <aside class="sidebar">
+          <div class="sidebar-block">
+            <h2>Configura la sesion</h2>
+            <label>
+              Estudiante
+              <input id="studentName" type="text" placeholder="Ej. Laura" />
+            </label>
+            <label>
+              Grado
+              <select id="gradeLevel">
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10" selected>10</option>
+                <option value="11">11</option>
+              </select>
+            </label>
+            <label>
+              Tema
+              <input id="topic" type="text" value="Leyes de Newton" />
+            </label>
+            <label>
+              Objetivo
+              <input
+                id="learningGoal"
+                type="text"
+                value="Comprender el tema y resolver ejercicios"
+              />
+            </label>
+            <label>
+              Modo
+              <select id="mode">
+                <option value="explicar" selected>Explicar</option>
+                <option value="practicar">Practicar</option>
+                <option value="resolver_paso_a_paso">Paso a paso</option>
+                <option value="quiz">Quiz</option>
+                <option value="repasar_antes_de_examen">Repaso</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="sidebar-block">
+            <h2>Ideas rapidas</h2>
+            <div id="suggestedPrompts" class="suggestions"></div>
+          </div>
+        </aside>
+
+        <section class="chat-panel">
+          <div class="chat-head">
+            <div>
+              <p class="eyebrow">Aula interactiva</p>
+              <h2 id="chatTitle">Sesión con el tutor</h2>
+            </div>
+            <span id="statusPill" class="status-pill">Listo</span>
+          </div>
+
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <form id="chatForm" class="composer">
+            <textarea
+              id="messageInput"
+              rows="3"
+              placeholder="Escribe tu duda de fisica aqui..."
+            ></textarea>
+            <input id="fileInput" type="file" accept="image/*,.pdf,application/pdf" multiple hidden />
+            <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
+            <div class="composer-actions">
+              <p class="helper">
+                Consejo: prueba pedir una explicacion, un quiz o resolver un ejercicio paso a paso.
+              </p>
+              <div class="composer-buttons">
+                <button type="button" id="voiceButton" class="attach-button voice-action">
+                  <span class="button-icon" aria-hidden="true">🎙</span>
+                  <span id="voiceButtonLabel">Hablar</span>
+                </button>
+                <button type="button" id="handsFreeButton" class="attach-button voice-action">
+                  <span class="button-icon" aria-hidden="true">🗣</span>
+                  <span id="handsFreeButtonLabel">Modo manos libres</span>
+                </button>
+                <button type="button" id="pauseVoiceButton" class="attach-button voice-action">
+                  <span class="button-icon" aria-hidden="true">⏸</span>
+                  <span id="pauseVoiceButtonLabel">Pausar voz</span>
+                </button>
+                <button type="button" id="pasteImageButton" class="attach-button voice-action">
+                  <span class="button-icon" aria-hidden="true">📋</span>
+                  <span>Pegar captura</span>
+                </button>
+                <button type="button" id="listenButton" class="attach-button voice-action">
+                  <span class="button-icon" aria-hidden="true">🔊</span>
+                  <span>Leer respuesta</span>
+                </button>
+                <button type="button" id="attachButton" class="attach-button">Adjuntar imagen o PDF</button>
+                <button type="submit" id="sendButton">Enviar</button>
+              </div>
+            </div>
+            <div class="voice-status" id="voiceStatus" aria-live="polite">
+              <span class="voice-status-dot"></span>
+              <span id="voiceStatusText">Voz lista</span>
+            </div>
+            <div class="voice-controls">
+              <label class="voice-toggle">
+                <input id="autoSpeakToggle" type="checkbox" checked />
+                <span>Lectura automática</span>
+              </label>
+              <label class="voice-select-wrap">
+                <span>Voz</span>
+                <select id="voiceSelect">
+                  <option value="">Voz del sistema</option>
+                </select>
+              </label>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+    <div class="session-alert" id="sessionAlert" role="alert" hidden>
+      <strong id="sessionAlertTitle">Aviso de sesión</strong>
+      <span id="sessionAlertText">El avatar se va a cerrar pronto.</span>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>

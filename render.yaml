@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tutor-fisica-virtual-planet
+    runtime: node
+    rootDir: embed
+    buildCommand: "node -e \"console.log('No build step required')\""
+    startCommand: "node server.js"
+    plan: starter
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5-mini
+      - key: SCHOOL_NAME
+        value: Virtual Planet
+      - key: TUTOR_NAME
+        value: Profesor Julián
