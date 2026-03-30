@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tutor de Fisica Embebible</title>
+    <title>Tutor IA Embebible</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,18 +16,18 @@
     <main class="shell">
       <section class="card hero">
         <div class="hero-copy">
-          <p class="eyebrow">Tutor IA de Fisica</p>
+          <p class="eyebrow" id="heroEyebrow">Tutor IA de Fisica</p>
           <h1 id="heroTitle">Profesor Julián</h1>
-          <p class="lead">
+          <p class="lead" id="heroLead">
             Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.
           </p>
           <p class="hero-quote">
-            <em>"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"</em>
-            <span>CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.</span>
+            <em id="heroQuoteText">"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"</em>
+            <span id="heroQuoteAuthor">CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.</span>
           </p>
           <section class="session-timer" id="sessionTimer" aria-live="polite">
             <div class="session-timer-copy">
-              <p class="session-kicker">Tiempo de trabajo</p>
+              <p class="session-kicker" id="timerKicker">Tiempo de trabajo</p>
               <span id="timerHint">Dispones de 15 minutos para trabajar con el avatar.</span>
             </div>
             <div class="timer-track" aria-hidden="true">
@@ -37,7 +37,7 @@
         </div>
         <div class="hero-portrait">
           <div class="portrait-glow"></div>
-          <img src="https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png" alt="Avatar del profesor de fisica" />
+          <img id="heroAvatar" src="https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png" alt="Avatar del profesor" />
           <div class="avatar-closed-overlay" id="avatarClosedOverlay" hidden>
             <strong>Sesión finalizada</strong>
             <span>El avatar se ha cerrado. Inicia una nueva sesión para continuar.</span>
@@ -65,11 +65,11 @@
               </select>
             </label>
             <label>
-              Tema
+              <span id="topicLabel">Tema</span>
               <input id="topic" type="text" value="Leyes de Newton" />
             </label>
             <label>
-              Objetivo
+              <span id="goalLabel">Objetivo</span>
               <input
                 id="learningGoal"
                 type="text"
@@ -97,7 +97,7 @@
         <section class="chat-panel">
           <div class="chat-head">
             <div>
-              <p class="eyebrow">Aula interactiva</p>
+              <p class="eyebrow" id="chatEyebrow">Aula interactiva</p>
               <h2 id="chatTitle">Sesión con el tutor</h2>
             </div>
             <span id="statusPill" class="status-pill">Listo</span>

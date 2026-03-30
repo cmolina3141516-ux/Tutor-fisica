@@ -7,38 +7,6 @@ const publicDir = path.join(rootDir, "public");
 const systemPromptPath = path.join(rootDir, "..", "agent", "tutor-fisica-system-prompt.md");
 const envPath = path.join(rootDir, ".env");
 const port = Number(process.env.PORT || 8787);
-const fallbackSystemPrompt = `Eres Profesor Julian, un tutor virtual de fisica para bachillerato en Colombia.
-
-Tu estilo:
-- Explica con claridad, cercania y precision.
-- Usa espanol claro y natural.
-- Adapta el nivel a 10° y 11°.
-- Prioriza comprension conceptual antes que tecnicismos innecesarios.
-
-Reglas pedagogicas:
-- Responde de forma ordenada y breve cuando la pregunta sea simple.
-- Si el estudiante pide un ejercicio, resuelvelo paso a paso.
-- Si detectas confusion, aclara primero la idea clave.
-- Usa ejemplos cotidianos cuando ayuden.
-- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
-- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico asociado.
-- Si no sabes algo con certeza, dilo con honestidad y ofrece una mejor aproximacion.
-
-Temas frecuentes:
-- MRU y MRUA
-- Leyes de Newton
-- Trabajo, energia y potencia
-- Cantidad de movimiento e impulso
-- Gravitacion
-- Movimiento circular
-- Ondas y sonido
-- Electricidad, ley de Ohm, circuitos y potencia electrica
-
-Formato recomendado:
-- Idea clave
-- Explicacion
-- Ejemplo o aplicacion
-- Siguiente paso sugerido`;
 
 loadEnv(envPath);
 
@@ -61,21 +29,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/api/config") {
+    const tutorConfig = buildTutorConfig();
     sendJson(res, 200, {
-      schoolName: process.env.SCHOOL_NAME || "Virtual Planet",
-      tutorName: process.env.TUTOR_NAME || "Profesor Julián",
-      suggestedPrompts: [
-        "Explicame la segunda ley de Newton con un ejemplo de 10°",
-        "Ayudame con un ejercicio de MRUA paso a paso",
-        "Hazme un quiz rapido sobre trabajo, energia y potencia",
-        "Repasemos cantidad de movimiento para 11°",
-        "Explicame la gravitacion con ejemplos cotidianos",
-        "Quiero practicar ejercicios de movimiento circular",
-        "Explícame las ondas: amplitud, frecuencia y longitud de onda",
-        "Recomiendame una simulacion para estudiar sonido y ondas",
-        "Explicame corriente, voltaje y resistencia con un circuito simple",
-        "Hazme preguntas rapidas sobre ley de Ohm y potencia electrica"
-      ]
+      ...tutorConfig
     });
     return;
   }
@@ -115,6 +71,13 @@ async function generateTutorReply(payload) {
   const studentContext = buildStudentContext(payload.session || {});
   const isQuizMode = payload.session?.mode === "quiz";
   const latestUserMessage = getLatestUserMessage(history);
+  if (getSubjectMode() === "mathematics" && shouldRejectAsNonMath(latestUserMessage)) {
+    return {
+      type: "text",
+      reply:
+        "Soy el profesor Esteban y este tutor trabaja solo Matemáticas. Si quieres, reformula tu consulta hacia un tema matemático como álgebra, geometría, funciones, probabilidad, trigonometría o cálculo básico."
+    };
+  }
   const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
   if (wantsImage && !isQuizMode) {
     return generateImageAnswer({
@@ -251,13 +214,16 @@ function extractGeneratedImages(data) {
 }
 
 async function generateImageAnswer({ apiKey, history, studentContext, prompt }) {
+  const subjectMode = getSubjectMode();
+  const subjectLabel = subjectMode === "mathematics" ? "matematicas" : "fisica";
   const imagePrompt = [
-    "Crea una imagen educativa de alta claridad para estudiantes de bachillerato.",
+    `Crea una imagen educativa de alta claridad para estudiantes de bachillerato sobre ${subjectLabel}.`,
     "La imagen debe verse limpia, profesional, moderna y visualmente realista o tecnicamente pulida segun el tema.",
     "No devuelvas ASCII, no simules SVG, no hagas texto como dibujo. Debe ser una imagen real.",
     "Usa fondo claro, composicion ordenada, alto contraste y elementos faciles de distinguir.",
-    "Si el tema es un circuito, genera un diagrama electrico limpio, preciso, legible y bien organizado.",
-    "Si el tema es ondas, fuerzas, vectores o fenomenos fisicos, genera una ilustracion didactica clara con etiquetas minimas y elegantes.",
+    "Si el tema requiere diagrama o esquema, genera una representacion limpia, precisa, legible y bien organizada.",
+    "Si el tema es matemático, prioriza gráficas claras, formas geométricas, expresiones limpias y rotulación mínima.",
+    "Si el tema es de física, prioriza diagramas e ilustraciones didácticas con etiquetas mínimas y elegantes.",
     "Evita ruido, exceso de texto, garabatos o estilo infantil.",
     "Prioriza exactitud conceptual y limpieza grafica.",
     `Contexto de sesion:\n${studentContext}`,
@@ -293,7 +259,7 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
             content: [
               {
                 type: "input_text",
-                text: `Eres un tutor de fisica para bachillerato. Explica en espanol de forma breve y clara lo que muestra la imagen solicitada y como interpretarla. Usa el siguiente contexto:\n${studentContext}`
+                text: `Eres un tutor de ${subjectLabel} para bachillerato. Explica en espanol de forma breve y clara lo que muestra la imagen solicitada y como interpretarla. Usa el siguiente contexto:\n${studentContext}`
               }
             ]
           },
@@ -466,6 +432,77 @@ function getLatestUserMessage(history) {
   return "";
 }
 
+function shouldRejectAsNonMath(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const mathCues = [
+    "matemat",
+    "algebra",
+    "aritmet",
+    "ecuacion",
+    "fraccion",
+    "porcentaje",
+    "funcion",
+    "geometr",
+    "trigonom",
+    "probabilidad",
+    "estadistica",
+    "derivada",
+    "integral",
+    "logarit",
+    "polinom",
+    "factorizacion",
+    "sistema de ecuaciones",
+    "perimetro",
+    "area",
+    "volumen",
+    "raiz",
+    "inecuacion",
+    "sucesion",
+    "limite"
+  ];
+
+  if (mathCues.some((cue) => normalized.includes(cue))) {
+    return false;
+  }
+
+  const nonMathCues = [
+    "fisica",
+    "newton",
+    "mru",
+    "mrua",
+    "energia",
+    "fuerza",
+    "electric",
+    "onda",
+    "quimica",
+    "biologia",
+    "historia",
+    "geografia",
+    "filosofia",
+    "lenguaje",
+    "literatura",
+    "ingles",
+    "sociales",
+    "circuito",
+    "voltaje",
+    "resistencia",
+    "gravitacion"
+  ];
+
+  return nonMathCues.some((cue) => normalized.includes(cue));
+}
+
+function normalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 function shouldGenerateImage(text) {
   const normalized = String(text || "").toLowerCase();
   if (!normalized) {
@@ -601,5 +638,175 @@ function loadSystemPrompt() {
     return fs.readFileSync(systemPromptPath, "utf8");
   }
 
-  return fallbackSystemPrompt;
+  return buildFallbackSystemPrompt();
+}
+
+function buildTutorConfig() {
+  const subjectMode = getSubjectMode();
+  const schoolName = process.env.SCHOOL_NAME || "Virtual Planet";
+  const tutorName =
+    process.env.TUTOR_NAME || (subjectMode === "mathematics" ? "Profesor Esteban" : "Profesor Julián");
+
+  if (subjectMode === "mathematics") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "Matemáticas",
+      pageTitle: "Tutor de Matemáticas Embebible",
+      heroEyebrow: "Tutor IA de Matemáticas",
+      heroLead:
+        "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances con seguridad en matemáticas.",
+      heroQuoteText:
+        '"Las matemáticas entrenan la mente para pensar con claridad, encontrar patrones y resolver problemas con confianza y creatividad."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN MATEMÁTICA",
+      avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/449HM2DP/PROFE-ESTEBAN-MATH.png",
+      avatarAlt: "Avatar del profesor de matemáticas",
+      chatEyebrow: "Aula interactiva",
+      timerKicker: "Tiempo de trabajo",
+      timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+      topicLabel: "Tema",
+      goalLabel: "Objetivo",
+      defaultTopic: "Álgebra y ecuaciones",
+      defaultLearningGoal: "Comprender el tema y resolver ejercicios paso a paso",
+      messagePlaceholder: "Escribe tu duda de matemáticas aquí...",
+      helperText:
+        "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso de matemáticas.",
+      welcomeMessage:
+        "Hola soy el profesor Esteban. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Matemáticas.",
+      suggestedPrompts: [
+        "Explícame ecuaciones lineales con un ejemplo de 6°",
+        "Ayúdame a resolver un sistema de ecuaciones paso a paso",
+        "Hazme un quiz rápido sobre fracciones y porcentajes",
+        "Repasemos productos notables para 9°",
+        "Explícame funciones lineales y su gráfica",
+        "Quiero practicar factorización con ejercicios guiados",
+        "Explícame probabilidad básica con ejemplos cotidianos",
+        "Ayúdame con áreas y perímetros paso a paso",
+        "Explícame trigonometría básica para 10°",
+        "Hazme preguntas rápidas sobre derivadas introductorias para 11°"
+      ]
+    };
+  }
+
+  return {
+    schoolName,
+    tutorName,
+    subjectName: "Física",
+    pageTitle: "Tutor de Física Embebible",
+    heroEyebrow: "Tutor IA de Fisica",
+    heroLead:
+      "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.",
+    heroQuoteText:
+      '"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"',
+    heroQuoteAuthor: "CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.",
+    avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png",
+    avatarAlt: "Avatar del profesor de física",
+    chatEyebrow: "Aula interactiva",
+    timerKicker: "Tiempo de trabajo",
+    timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+    topicLabel: "Tema",
+    goalLabel: "Objetivo",
+    defaultTopic: "Leyes de Newton",
+    defaultLearningGoal: "Comprender el tema y resolver ejercicios",
+    messagePlaceholder: "Escribe tu duda de física aquí...",
+    helperText:
+      "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
+    welcomeMessage:
+      "Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Física.",
+    suggestedPrompts: [
+      "Explicame la segunda ley de Newton con un ejemplo de 10°",
+      "Ayudame con un ejercicio de MRUA paso a paso",
+      "Hazme un quiz rapido sobre trabajo, energia y potencia",
+      "Repasemos cantidad de movimiento para 11°",
+      "Explicame la gravitacion con ejemplos cotidianos",
+      "Quiero practicar ejercicios de movimiento circular",
+      "Explícame las ondas: amplitud, frecuencia y longitud de onda",
+      "Recomiendame una simulacion para estudiar sonido y ondas",
+      "Explicame corriente, voltaje y resistencia con un circuito simple",
+      "Hazme preguntas rapidas sobre ley de Ohm y potencia electrica"
+    ]
+  };
+}
+
+function getSubjectMode() {
+  const value = String(process.env.TUTOR_SUBJECT || "physics").toLowerCase();
+  if (["math", "mathematics", "matematicas", "matemáticas"].includes(value)) {
+    return "mathematics";
+  }
+  return "physics";
+}
+
+function buildFallbackSystemPrompt() {
+  const subjectMode = getSubjectMode();
+  if (subjectMode === "mathematics") {
+    return `Eres Profesor Esteban, un tutor virtual de matemáticas para bachillerato en Colombia.
+
+Tu estilo:
+- Explica con claridad, cercania y precision.
+- Usa espanol claro y natural.
+- Adapta el nivel desde 6° hasta 11°.
+- Prioriza comprension conceptual y procedimiento ordenado.
+
+Reglas pedagogicas:
+- Responde de forma ordenada y breve cuando la pregunta sea simple.
+- Si el estudiante pide un ejercicio, resuelvelo paso a paso.
+- Si detectas confusion, aclara primero la idea clave.
+- Usa ejemplos numéricos claros cuando ayuden.
+- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
+- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto matemático asociado.
+- Atiendes solamente temas de matemáticas. Si preguntan por otra asignatura, responde brevemente que este tutor solo trabaja matemáticas y ofrece reconducir la consulta a un tema matemático relacionado.
+- No des orientación sobre temas ajenos a matemáticas.
+
+Temas frecuentes:
+- Aritmética
+- Fracciones, porcentajes y razones
+- Álgebra
+- Ecuaciones y sistemas
+- Productos notables y factorización
+- Funciones y gráficas
+- Geometría
+- Trigonometría básica
+- Probabilidad y estadística
+- Cálculo introductorio para 11°
+
+Formato recomendado:
+- Idea clave
+- Explicacion
+- Procedimiento
+- Ejemplo o aplicacion
+- Siguiente paso sugerido`;
+  }
+
+  return `Eres Profesor Julian, un tutor virtual de fisica para bachillerato en Colombia.
+
+Tu estilo:
+- Explica con claridad, cercania y precision.
+- Usa espanol claro y natural.
+- Adapta el nivel a 10° y 11°.
+- Prioriza comprension conceptual antes que tecnicismos innecesarios.
+
+Reglas pedagogicas:
+- Responde de forma ordenada y breve cuando la pregunta sea simple.
+- Si el estudiante pide un ejercicio, resuelvelo paso a paso.
+- Si detectas confusion, aclara primero la idea clave.
+- Usa ejemplos cotidianos cuando ayuden.
+- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
+- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico asociado.
+- Si no sabes algo con certeza, dilo con honestidad y ofrece una mejor aproximacion.
+
+Temas frecuentes:
+- MRU y MRUA
+- Leyes de Newton
+- Trabajo, energia y potencia
+- Cantidad de movimiento e impulso
+- Gravitacion
+- Movimiento circular
+- Ondas y sonido
+- Electricidad, ley de Ohm, circuitos y potencia electrica
+
+Formato recomendado:
+- Idea clave
+- Explicacion
+- Ejemplo o aplicacion
+- Siguiente paso sugerido`;
 }

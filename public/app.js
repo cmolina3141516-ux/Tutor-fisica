@@ -1,6 +1,7 @@
 const state = {
   tutorName: "Profesor Julián",
   schoolName: "Virtual Planet",
+  subjectName: "Física",
   messages: [],
   activeQuiz: null,
   pendingAttachments: [],
@@ -21,9 +22,16 @@ const state = {
 };
 
 const elements = {
+  heroEyebrow: document.getElementById("heroEyebrow"),
   heroTitle: document.getElementById("heroTitle"),
+  heroLead: document.getElementById("heroLead"),
+  heroQuoteText: document.getElementById("heroQuoteText"),
+  heroQuoteAuthor: document.getElementById("heroQuoteAuthor"),
+  heroAvatar: document.getElementById("heroAvatar"),
   chatTitle: document.getElementById("chatTitle"),
+  chatEyebrow: document.getElementById("chatEyebrow"),
   statusPill: document.getElementById("statusPill"),
+  timerKicker: document.getElementById("timerKicker"),
   timerHint: document.getElementById("timerHint"),
   timerFill: document.getElementById("timerFill"),
   avatarClosedOverlay: document.getElementById("avatarClosedOverlay"),
@@ -52,7 +60,9 @@ const elements = {
   sendButton: document.getElementById("sendButton"),
   studentName: document.getElementById("studentName"),
   gradeLevel: document.getElementById("gradeLevel"),
+  topicLabel: document.getElementById("topicLabel"),
   topic: document.getElementById("topic"),
+  goalLabel: document.getElementById("goalLabel"),
   learningGoal: document.getElementById("learningGoal"),
   mode: document.getElementById("mode")
 };
@@ -159,9 +169,29 @@ async function bootstrap() {
 
   state.tutorName = config.tutorName || state.tutorName;
   state.schoolName = config.schoolName || state.schoolName;
+  state.subjectName = config.subjectName || state.subjectName;
 
+  document.title = config.pageTitle || "Tutor IA Embebible";
+  elements.heroEyebrow.textContent = config.heroEyebrow || `Tutor IA de ${state.subjectName}`;
   elements.heroTitle.textContent = state.tutorName;
+  elements.heroLead.textContent = config.heroLead || elements.heroLead.textContent;
+  elements.heroQuoteText.textContent = config.heroQuoteText || elements.heroQuoteText.textContent;
+  elements.heroQuoteAuthor.textContent = config.heroQuoteAuthor || elements.heroQuoteAuthor.textContent;
+  elements.heroAvatar.src = config.avatarUrl || elements.heroAvatar.src;
+  elements.heroAvatar.alt = config.avatarAlt || `Avatar de ${state.tutorName}`;
+  elements.chatEyebrow.textContent = config.chatEyebrow || "Aula interactiva";
   elements.chatTitle.textContent = `Sesión con ${state.tutorName}`;
+  elements.timerKicker.textContent = config.timerKicker || "Tiempo de trabajo";
+  elements.timerHint.textContent = config.timerHint || "Dispones de 15 minutos para trabajar con el avatar.";
+  elements.topicLabel.textContent = config.topicLabel || "Tema";
+  elements.goalLabel.textContent = config.goalLabel || "Objetivo";
+  elements.topic.value = config.defaultTopic || elements.topic.value;
+  elements.learningGoal.value = config.defaultLearningGoal || elements.learningGoal.value;
+  elements.input.placeholder = config.messagePlaceholder || elements.input.placeholder;
+  const helper = document.querySelector(".helper");
+  if (helper && config.helperText) {
+    helper.textContent = config.helperText;
+  }
 
   const prompts = Array.isArray(config.suggestedPrompts) ? config.suggestedPrompts : [];
   for (const prompt of prompts) {
@@ -177,7 +207,8 @@ async function bootstrap() {
 
   appendMessage(
     "assistant",
-    `Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Física.`
+    config.welcomeMessage ||
+      `Hola soy el ${state.tutorName}. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con ${state.subjectName}.`
   );
 
   startSessionTimer();
@@ -217,7 +248,7 @@ async function askTutor(userText, attachments = []) {
 
   const assistantSummary =
     data.type === "quiz"
-      ? `[Quiz interactivo] ${data.quiz?.title || "Quiz rapido de fisica"}`
+      ? `[Quiz interactivo] ${data.quiz?.title || `Quiz rapido de ${state.subjectName}`}`
       : String(data.reply || "");
 
   state.messages = [
@@ -365,7 +396,7 @@ function appendQuiz(quiz) {
   header.className = "quiz-header";
   header.innerHTML = `
     <p class="quiz-kicker">Quiz rapido</p>
-    <h3>${escapeHtml(quiz.title || "Quiz rapido de fisica")}</h3>
+    <h3>${escapeHtml(quiz.title || `Quiz rapido de ${state.subjectName}`)}</h3>
     <p class="quiz-topic">${escapeHtml(quiz.topic || "Pon a prueba lo que sabes en pocos minutos.")}</p>
   `;
 
@@ -373,7 +404,7 @@ function appendQuiz(quiz) {
   body.className = "quiz-body";
 
   const quizState = {
-    title: quiz.title || "Quiz rapido de fisica",
+    title: quiz.title || `Quiz rapido de ${state.subjectName}`,
     closing: quiz.closing || "",
     questions: quiz.questions || [],
     answers: new Array((quiz.questions || []).length).fill(null),
