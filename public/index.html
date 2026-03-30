@@ -12,23 +12,23 @@
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="app-loading">
     <main class="shell">
       <section class="card hero">
         <div class="hero-copy">
-          <p class="eyebrow" id="heroEyebrow">Tutor IA de Fisica</p>
-          <h1 id="heroTitle">Profesor Julián</h1>
+          <p class="eyebrow" id="heroEyebrow">Tutor IA</p>
+          <h1 id="heroTitle">Cargando tutor...</h1>
           <p class="lead" id="heroLead">
-            Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.
+            Preparando el tutor para tu sesión...
           </p>
           <p class="hero-quote">
-            <em id="heroQuoteText">"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"</em>
-            <span id="heroQuoteAuthor">CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.</span>
+            <em id="heroQuoteText">"Aprender con claridad y constancia transforma la forma en que comprendemos el mundo."</em>
+            <span id="heroQuoteAuthor">VIRTUAL PLANET</span>
           </p>
           <section class="session-timer" id="sessionTimer" aria-live="polite">
             <div class="session-timer-copy">
               <p class="session-kicker" id="timerKicker">Tiempo de trabajo</p>
-              <span id="timerHint">Dispones de 15 minutos para trabajar con el avatar.</span>
+              <span id="timerHint">Preparando la sesión interactiva.</span>
             </div>
             <div class="timer-track" aria-hidden="true">
               <div class="timer-fill" id="timerFill"></div>
@@ -37,7 +37,7 @@
         </div>
         <div class="hero-portrait">
           <div class="portrait-glow"></div>
-          <img id="heroAvatar" src="https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png" alt="Avatar del profesor" />
+          <img id="heroAvatar" src="https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png" alt="Avatar del tutor" />
           <div class="avatar-closed-overlay" id="avatarClosedOverlay" hidden>
             <strong>Sesión finalizada</strong>
             <span>El avatar se ha cerrado. Inicia una nueva sesión para continuar.</span>
@@ -66,14 +66,14 @@
             </label>
             <label>
               <span id="topicLabel">Tema</span>
-              <input id="topic" type="text" value="Leyes de Newton" />
+              <input id="topic" type="text" value="" />
             </label>
             <label>
               <span id="goalLabel">Objetivo</span>
               <input
                 id="learningGoal"
                 type="text"
-                value="Comprender el tema y resolver ejercicios"
+                value=""
               />
             </label>
             <label>
@@ -98,7 +98,7 @@
           <div class="chat-head">
             <div>
               <p class="eyebrow" id="chatEyebrow">Aula interactiva</p>
-              <h2 id="chatTitle">Sesión con el tutor</h2>
+              <h2 id="chatTitle">Preparando sesión</h2>
             </div>
             <span id="statusPill" class="status-pill">Listo</span>
           </div>
@@ -109,13 +109,13 @@
             <textarea
               id="messageInput"
               rows="3"
-              placeholder="Escribe tu duda de fisica aqui..."
+              placeholder="Cargando tutor..."
             ></textarea>
             <input id="fileInput" type="file" accept="image/*,.pdf,application/pdf" multiple hidden />
             <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
             <div class="composer-actions">
               <p class="helper">
-                Consejo: prueba pedir una explicacion, un quiz o resolver un ejercicio paso a paso.
+                Consejo: en unos segundos podrás comenzar a trabajar con el tutor.
               </p>
               <div class="composer-buttons">
                 <button type="button" id="voiceButton" class="attach-button voice-action">

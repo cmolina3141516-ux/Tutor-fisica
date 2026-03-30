@@ -68,6 +68,7 @@ const elements = {
 };
 
 bootstrap().catch((error) => {
+  document.body.classList.remove("app-loading");
   appendMessage("assistant", `No pude iniciar el tutor: ${error.message}`);
 });
 
@@ -220,6 +221,7 @@ async function bootstrap() {
       populateVoiceOptions();
     };
   }
+  document.body.classList.remove("app-loading");
 }
 
 async function askTutor(userText, attachments = []) {

@@ -1032,3 +1032,13 @@ button[type="submit"]:disabled {
     min-width: 0;
   }
 }
+body.app-loading .shell {
+  opacity: 0;
+  visibility: hidden;
+}
+
+body:not(.app-loading) .shell {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.2s ease;
+}
