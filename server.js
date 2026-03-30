@@ -71,11 +71,19 @@ async function generateTutorReply(payload) {
   const studentContext = buildStudentContext(payload.session || {});
   const isQuizMode = payload.session?.mode === "quiz";
   const latestUserMessage = getLatestUserMessage(history);
-  if (getSubjectMode() === "mathematics" && shouldRejectAsNonMath(latestUserMessage)) {
+  const subjectMode = getSubjectMode();
+  if (subjectMode === "mathematics" && shouldRejectAsNonMath(latestUserMessage)) {
     return {
       type: "text",
       reply:
         "Soy el profesor Esteban y este tutor trabaja solo Matemáticas. Si quieres, reformula tu consulta hacia un tema matemático como álgebra, geometría, funciones, probabilidad, trigonometría o cálculo básico."
+    };
+  }
+  if (subjectMode === "social_studies" && shouldRejectAsNonSocialStudies(latestUserMessage)) {
+    return {
+      type: "text",
+      reply:
+        "Soy la profesora Laura y este tutor trabaja solo Ciencias Sociales. Si quieres, puedo ayudarte con historia, geografía, ciudadanía, constitución política, economía básica o análisis social escolar."
     };
   }
   const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
@@ -215,7 +223,8 @@ function extractGeneratedImages(data) {
 
 async function generateImageAnswer({ apiKey, history, studentContext, prompt }) {
   const subjectMode = getSubjectMode();
-  const subjectLabel = subjectMode === "mathematics" ? "matematicas" : "fisica";
+  const subjectLabel =
+    subjectMode === "mathematics" ? "matematicas" : subjectMode === "social_studies" ? "ciencias sociales" : "fisica";
   const imagePrompt = [
     `Crea una imagen educativa de alta claridad para estudiantes de bachillerato sobre ${subjectLabel}.`,
     "La imagen debe verse limpia, profesional, moderna y visualmente realista o tecnicamente pulida segun el tema.",
@@ -224,6 +233,7 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
     "Si el tema requiere diagrama o esquema, genera una representacion limpia, precisa, legible y bien organizada.",
     "Si el tema es matemático, prioriza gráficas claras, formas geométricas, expresiones limpias y rotulación mínima.",
     "Si el tema es de física, prioriza diagramas e ilustraciones didácticas con etiquetas mínimas y elegantes.",
+    "Si el tema es de ciencias sociales, prioriza mapas, líneas de tiempo, esquemas institucionales, escenas históricas o gráficos sociales claros y escolares.",
     "Evita ruido, exceso de texto, garabatos o estilo infantil.",
     "Prioriza exactitud conceptual y limpieza grafica.",
     `Contexto de sesion:\n${studentContext}`,
@@ -280,7 +290,7 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
             content: [
               {
                 type: "input_text",
-                text: `El estudiante pidio esta imagen: ${prompt}\nDa una explicacion breve en 3 partes: que se ve, concepto fisico principal y una recomendacion corta de estudio.`
+                text: `El estudiante pidio esta imagen: ${prompt}\nDa una explicacion breve en 3 partes: que se ve, concepto principal del tema y una recomendacion corta de estudio.`
               }
             ]
           }
@@ -328,10 +338,17 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
 }
 
 function buildStudentContext(session) {
+  const subjectMode = getSubjectMode();
+  const defaultTopic =
+    subjectMode === "mathematics"
+      ? "Matemáticas generales"
+      : subjectMode === "social_studies"
+        ? "Ciencias sociales generales"
+        : "Fisica general";
   const lines = [
     `Nombre del estudiante: ${session.student_name || "No indicado"}`,
     `Grado: ${session.grade_level || "Bachillerato"}`,
-    `Tema: ${session.topic || "Fisica general"}`,
+    `Tema: ${session.topic || defaultTopic}`,
     `Objetivo: ${session.learning_goal || "Comprender el tema consultado"}`,
     `Dificultad: ${session.difficulty || "media"}`,
     `Modo: ${session.mode || "explicar"}`,
@@ -342,6 +359,13 @@ function buildStudentContext(session) {
 }
 
 function parseQuizReply(reply) {
+  const subjectMode = getSubjectMode();
+  const defaultQuizTitle =
+    subjectMode === "mathematics"
+      ? "Quiz rapido de matemáticas"
+      : subjectMode === "social_studies"
+        ? "Quiz rapido de ciencias sociales"
+        : "Quiz rapido de fisica";
   let parsed;
   try {
     parsed = JSON.parse(reply);
@@ -370,7 +394,7 @@ function parseQuizReply(reply) {
   });
 
   return {
-    title: String(parsed.title || "Quiz rapido de fisica"),
+    title: String(parsed.title || defaultQuizTitle),
     topic: String(parsed.topic || ""),
     questions,
     closing: String(parsed.closing || "Buen trabajo. Sigue practicando para reforzar el tema.")
@@ -494,6 +518,65 @@ function shouldRejectAsNonMath(text) {
   ];
 
   return nonMathCues.some((cue) => normalized.includes(cue));
+}
+
+function shouldRejectAsNonSocialStudies(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const socialCues = [
+    "historia",
+    "geografia",
+    "ciudadania",
+    "constitucion",
+    "democracia",
+    "economia",
+    "cultura",
+    "sociedad",
+    "territorio",
+    "estado",
+    "gobierno",
+    "nacion",
+    "politica",
+    "social",
+    "colombia",
+    "independencia",
+    "segunda guerra mundial",
+    "globalizacion",
+    "inflacion",
+    "participacion ciudadana"
+  ];
+
+  if (socialCues.some((cue) => normalized.includes(cue))) {
+    return false;
+  }
+
+  const nonSocialCues = [
+    "fisica",
+    "newton",
+    "mru",
+    "mrua",
+    "energia",
+    "fuerza",
+    "matemat",
+    "algebra",
+    "ecuacion",
+    "fraccion",
+    "derivada",
+    "quimica",
+    "biologia",
+    "celula",
+    "lenguaje",
+    "sintaxis",
+    "ingles",
+    "verb to be",
+    "programacion",
+    "codigo"
+  ];
+
+  return nonSocialCues.some((cue) => normalized.includes(cue));
 }
 
 function normalizeText(text) {
@@ -645,7 +728,12 @@ function buildTutorConfig() {
   const subjectMode = getSubjectMode();
   const schoolName = process.env.SCHOOL_NAME || "Virtual Planet";
   const tutorName =
-    process.env.TUTOR_NAME || (subjectMode === "mathematics" ? "Profesor Esteban" : "Profesor Julián");
+    process.env.TUTOR_NAME ||
+    (subjectMode === "mathematics"
+      ? "Profesor Esteban"
+      : subjectMode === "social_studies"
+        ? "Profesora Laura"
+        : "Profesor Julián");
 
   if (subjectMode === "mathematics") {
     return {
@@ -684,6 +772,47 @@ function buildTutorConfig() {
         "Ayúdame con áreas y perímetros paso a paso",
         "Explícame trigonometría básica para 10°",
         "Hazme preguntas rápidas sobre derivadas introductorias para 11°"
+      ]
+    };
+  }
+
+  if (subjectMode === "social_studies") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "Ciencias Sociales",
+      pageTitle: "Tutor de Ciencias Sociales Embebible",
+      heroEyebrow: "Tutor IA de Ciencias Sociales",
+      heroLead:
+        "Explicaciones claras, análisis guiado, comprensión de procesos históricos y sociales, apoyo para tareas y desarrollo de pensamiento crítico en ciencias sociales.",
+      heroQuoteText:
+        '"Comprender la sociedad, la historia y la ciudadanía nos ayuda a leer mejor el presente y participar con criterio en el mundo que habitamos."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN CIENCIAS SOCIALES",
+      avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/pybsrd2j/PROFE-LAURA-CIENCIAS-SOCIALES.png",
+      avatarAlt: "Avatar de la profesora de ciencias sociales",
+      chatEyebrow: "Aula interactiva",
+      timerKicker: "Tiempo de trabajo",
+      timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+      topicLabel: "Tema",
+      goalLabel: "Objetivo",
+      defaultTopic: "Historia de Colombia y ciudadanía",
+      defaultLearningGoal: "Comprender el tema, analizar procesos sociales y preparar actividades escolares",
+      messagePlaceholder: "Escribe tu duda de ciencias sociales aquí...",
+      helperText:
+        "Consejo: pide explicaciones, líneas de tiempo, comparaciones históricas, quizzes o análisis social escolar.",
+      welcomeMessage:
+        "Hola soy la profesora Laura. Puedo ayudarte con explicaciones claras, análisis guiado y aclaración de dudas sobre temas de Ciencias Sociales. Este tutor trabaja solo dentro de esta asignatura.",
+      suggestedPrompts: [
+        "Explícame la independencia de Colombia con una línea de tiempo sencilla",
+        "Ayúdame a comparar Estado, gobierno y nación",
+        "Hazme un quiz rápido sobre geografía de Colombia",
+        "Explícame la Constitución Política de 1991 para bachillerato",
+        "Quiero entender democracia y participación ciudadana con ejemplos",
+        "Resúmeme las causas y consecuencias de la Segunda Guerra Mundial",
+        "Explícame regiones naturales de Colombia de forma clara",
+        "Ayúdame a preparar una exposición sobre globalización",
+        "Analiza un tema actual político o social con enfoque escolar y neutral",
+        "Explícame economía básica: oferta, demanda e inflación"
       ]
     };
   }
@@ -733,6 +862,9 @@ function getSubjectMode() {
   if (["math", "mathematics", "matematicas", "matemáticas"].includes(value)) {
     return "mathematics";
   }
+  if (["social", "sociales", "social_studies", "ciencias sociales", "ciencias_sociales"].includes(value)) {
+    return "social_studies";
+  }
   return "physics";
 }
 
@@ -774,6 +906,44 @@ Formato recomendado:
 - Explicacion
 - Procedimiento
 - Ejemplo o aplicacion
+- Siguiente paso sugerido`;
+  }
+
+  if (subjectMode === "social_studies") {
+    return `Eres Profesora Laura, una tutora virtual de ciencias sociales para bachillerato en Colombia.
+
+Tu estilo:
+- Explica con claridad, cercania y precision.
+- Usa espanol claro y natural.
+- Adapta el nivel desde 6° hasta 11°.
+- Prioriza comprensión histórica, geográfica, ciudadana y social.
+
+Reglas pedagogicas:
+- Responde de forma ordenada y breve cuando la pregunta sea simple.
+- Si el estudiante pide una tarea, exposición o taller, ayuda a estructurarlo.
+- Si detectas confusión, aclara primero la idea clave.
+- Usa comparaciones, líneas de tiempo y ejemplos escolares cuando ayuden.
+- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
+- Si revisas imágenes o PDFs, describe lo relevante y explica el concepto social, histórico, geográfico o ciudadano asociado.
+- Atiendes solamente temas de ciencias sociales. Si preguntan por otra asignatura, responde brevemente que este tutor solo trabaja ciencias sociales y ofrece reconducir la consulta a un tema social relacionado.
+- Mantén un enfoque pedagógico, neutral y respetuoso.
+- En temas de actualidad política y social, ofrece un análisis escolar, equilibrado y prudente. No inventes hechos ni datos recientes. Si el tema depende de información muy actual, aclara que conviene contrastarlo con fuentes periodísticas o institucionales recientes.
+
+Temas frecuentes:
+- Historia de Colombia
+- Historia universal
+- Geografía de Colombia y del mundo
+- Constitución política y ciudadanía
+- Democracia y participación
+- Economía básica
+- Cultura, sociedad y territorio
+- Conflictos y procesos sociales
+
+Formato recomendado:
+- Idea clave
+- Contexto
+- Explicacion
+- Comparación, línea de tiempo o ejemplo
 - Siguiente paso sugerido`;
   }
 
