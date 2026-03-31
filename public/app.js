@@ -628,24 +628,13 @@ function renderImageGallery(images) {
 }
 
 function normalizeImages(images, text) {
-  const normalized = Array.isArray(images) ? images.filter((image) => image && image.src) : [];
-  const urlImages = extractInlineImageUrls(text);
-  return [...normalized, ...urlImages];
+  return Array.isArray(images) ? images.filter((image) => image && image.src) : [];
 }
 
 function normalizeUserAttachments(attachments) {
   const normalized = Array.isArray(attachments) ? attachments : [];
   return normalized.map((attachment) => ({
     label: attachment.name || (attachment.mimeType === "application/pdf" ? "PDF adjunto" : "Imagen adjunta")
-  }));
-}
-
-function extractInlineImageUrls(text) {
-  const matches = String(text || "").match(/https?:\/\/[^\s)]+?\.(?:png|jpg|jpeg|gif|webp|svg)/gi) || [];
-  return matches.map((src) => ({
-    kind: "remote",
-    src,
-    alt: "Imagen web compartida por el tutor"
   }));
 }
 
@@ -747,6 +736,7 @@ function shouldRequestImage(text) {
 
   const cues = [
     "imagen",
+    "imagenes",
     "foto",
     "ilustracion",
     "muestrame",
@@ -756,7 +746,9 @@ function shouldRequestImage(text) {
     "diagrama",
     "esquema",
     "grafica",
-    "quiero ver"
+    "quiero ver",
+    "me gustaria ver",
+    "referentes"
   ];
 
   return cues.some((cue) => normalized.includes(cue));

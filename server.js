@@ -240,6 +240,9 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
           : "fisica";
   const imagePrompt = [
     `Crea una imagen educativa de alta claridad para estudiantes de bachillerato sobre ${subjectLabel}.`,
+    "La imagen debe corresponder exactamente a lo pedido por el estudiante.",
+    "No asumas que el estudiante adjuntó una imagen para analizar; aquí debes generar una imagen nueva desde cero.",
+    "Si el estudiante pide referencias visuales, genera una composición clara con ejemplos representativos del tema.",
     "La imagen debe verse limpia, profesional, moderna y visualmente realista o tecnicamente pulida segun el tema.",
     "No devuelvas ASCII, no simules SVG, no hagas texto como dibujo. Debe ser una imagen real.",
     "Usa fondo claro, composicion ordenada, alto contraste y elementos faciles de distinguir.",
@@ -283,7 +286,7 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
             content: [
               {
                 type: "input_text",
-                text: `Eres un tutor de ${subjectLabel} para bachillerato. Explica en espanol de forma breve y clara lo que muestra la imagen solicitada y como interpretarla. Usa el siguiente contexto:\n${studentContext}`
+                text: `Eres un tutor de ${subjectLabel} para bachillerato. Ya se generó una imagen nueva a partir de la petición del estudiante. Explica en espanol de forma breve y clara lo que muestra la imagen solicitada y como interpretarla. Nunca digas que no ves una imagen adjunta, nunca pidas que suban una foto y nunca respondas como si faltara un archivo. Usa el siguiente contexto:\n${studentContext}`
               }
             ]
           },
@@ -332,7 +335,8 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
   const imageData = await imageResult.json();
   const explanationData = await explanationResult.json();
   const imageBase64 = imageData?.data?.[0]?.b64_json;
-  const explanation = extractOutputText(explanationData) || "Aqui tienes la imagen solicitada.";
+  const rawExplanation = extractOutputText(explanationData) || "";
+  const explanation = sanitizeGeneratedImageExplanation(rawExplanation, prompt);
 
   if (!imageBase64) {
     throw new Error("La API de imagenes no devolvio una imagen valida.");
@@ -349,6 +353,23 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
       }
     ]
   };
+}
+
+function sanitizeGeneratedImageExplanation(text, prompt) {
+  const normalized = normalizeText(text);
+  if (
+    !text ||
+    normalized.includes("no veo ninguna imagen") ||
+    normalized.includes("no veo imagen") ||
+    normalized.includes("imagen adjunta") ||
+    normalized.includes("sube la foto") ||
+    normalized.includes("sube la imagen") ||
+    normalized.includes("adjunta la foto")
+  ) {
+    return `Aquí tienes una imagen generada según tu solicitud: ${prompt}. Si quieres, también puedo explicarte lo que se observa o generar una versión más precisa.`;
+  }
+
+  return text;
 }
 
 function buildStudentContext(session) {
@@ -661,15 +682,15 @@ function normalizeText(text) {
 }
 
 function shouldGenerateImage(text) {
-  const normalized = String(text || "").toLowerCase();
+  const normalized = normalizeText(text);
   if (!normalized) {
     return false;
   }
 
   if (
     normalized.includes("imagen") ||
+    normalized.includes("imagenes") ||
     normalized.includes("foto") ||
-    normalized.includes("ilustración") ||
     normalized.includes("ilustracion")
   ) {
     return true;
@@ -685,14 +706,26 @@ function shouldGenerateImage(text) {
     "genera una imagen",
     "genera la imagen",
     "genera imagen",
+    "genera imagenes",
     "genera un diagrama",
     "genera un esquema",
     "crea una imagen",
     "crea la imagen",
+    "crea una ilustracion",
     "crea un diagrama",
     "haz una imagen",
+    "hazme una imagen",
+    "quiero una imagen",
+    "quiero ver una imagen",
+    "quiero ver imagenes",
+    "me gustaria ver",
+    "me gustaria una imagen",
+    "me gustaria ver imagenes",
+    "ver referencias",
+    "tener referentes",
     "quiero ver",
     "imagen de",
+    "imagenes de",
     "imagen del",
     "imagen para",
     "dibuj",
