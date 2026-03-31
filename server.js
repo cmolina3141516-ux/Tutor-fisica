@@ -86,6 +86,13 @@ async function generateTutorReply(payload) {
         "Soy la profesora Laura y este tutor trabaja solo Ciencias Sociales. Si quieres, puedo ayudarte con historia, geografía, ciudadanía, constitución política, economía básica o análisis social escolar."
     };
   }
+  if (subjectMode === "natural_sciences" && shouldRejectAsNonNaturalSciences(latestUserMessage)) {
+    return {
+      type: "text",
+      reply:
+        "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Educación Ambiental. Si quieres, puedo ayudarte con ecosistemas, célula, biodiversidad, ambiente, método científico, materia y proyectos escolares ambientales."
+    };
+  }
   const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
   if (wantsImage && !isQuizMode) {
     return generateImageAnswer({
@@ -224,7 +231,13 @@ function extractGeneratedImages(data) {
 async function generateImageAnswer({ apiKey, history, studentContext, prompt }) {
   const subjectMode = getSubjectMode();
   const subjectLabel =
-    subjectMode === "mathematics" ? "matematicas" : subjectMode === "social_studies" ? "ciencias sociales" : "fisica";
+    subjectMode === "mathematics"
+      ? "matematicas"
+      : subjectMode === "social_studies"
+        ? "ciencias sociales"
+        : subjectMode === "natural_sciences"
+          ? "ciencias naturales y educacion ambiental"
+          : "fisica";
   const imagePrompt = [
     `Crea una imagen educativa de alta claridad para estudiantes de bachillerato sobre ${subjectLabel}.`,
     "La imagen debe verse limpia, profesional, moderna y visualmente realista o tecnicamente pulida segun el tema.",
@@ -234,6 +247,7 @@ async function generateImageAnswer({ apiKey, history, studentContext, prompt }) 
     "Si el tema es matemático, prioriza gráficas claras, formas geométricas, expresiones limpias y rotulación mínima.",
     "Si el tema es de física, prioriza diagramas e ilustraciones didácticas con etiquetas mínimas y elegantes.",
     "Si el tema es de ciencias sociales, prioriza mapas, líneas de tiempo, esquemas institucionales, escenas históricas o gráficos sociales claros y escolares.",
+    "Si el tema es de ciencias naturales, prioriza procesos biológicos, ecosistemas, ilustraciones ambientales, laboratorios escolares o esquemas científicos claros y didácticos.",
     "Evita ruido, exceso de texto, garabatos o estilo infantil.",
     "Prioriza exactitud conceptual y limpieza grafica.",
     `Contexto de sesion:\n${studentContext}`,
@@ -344,6 +358,8 @@ function buildStudentContext(session) {
       ? "Matemáticas generales"
       : subjectMode === "social_studies"
         ? "Ciencias sociales generales"
+        : subjectMode === "natural_sciences"
+          ? "Ciencias naturales y ambiente"
         : "Fisica general";
   const lines = [
     `Nombre del estudiante: ${session.student_name || "No indicado"}`,
@@ -365,6 +381,8 @@ function parseQuizReply(reply) {
       ? "Quiz rapido de matemáticas"
       : subjectMode === "social_studies"
         ? "Quiz rapido de ciencias sociales"
+        : subjectMode === "natural_sciences"
+          ? "Quiz rapido de ciencias naturales"
         : "Quiz rapido de fisica";
   let parsed;
   try {
@@ -579,6 +597,62 @@ function shouldRejectAsNonSocialStudies(text) {
   return nonSocialCues.some((cue) => normalized.includes(cue));
 }
 
+function shouldRejectAsNonNaturalSciences(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const naturalCues = [
+    "ciencias naturales",
+    "ambiente",
+    "ambiental",
+    "ecosistema",
+    "cadena alimenticia",
+    "celula",
+    "fotosintesis",
+    "respiracion celular",
+    "biodiversidad",
+    "seres vivos",
+    "metodo cientifico",
+    "materia",
+    "mezclas",
+    "soluciones",
+    "reciclaje",
+    "sostenibilidad",
+    "huerta",
+    "reino animal",
+    "reino vegetal",
+    "quimica basica",
+    "biologia"
+  ];
+
+  if (naturalCues.some((cue) => normalized.includes(cue))) {
+    return false;
+  }
+
+  const nonNaturalCues = [
+    "matemat",
+    "algebra",
+    "ecuacion",
+    "fraccion",
+    "derivada",
+    "sociales",
+    "historia",
+    "geografia",
+    "constitucion",
+    "democracia",
+    "lenguaje",
+    "sintaxis",
+    "ingles",
+    "verb to be",
+    "programacion",
+    "codigo"
+  ];
+
+  return nonNaturalCues.some((cue) => normalized.includes(cue));
+}
+
 function normalizeText(text) {
   return String(text || "")
     .toLowerCase()
@@ -733,6 +807,8 @@ function buildTutorConfig() {
       ? "Profesor Esteban"
       : subjectMode === "social_studies"
         ? "Profesora Laura"
+        : subjectMode === "natural_sciences"
+          ? "Profesor Andrés"
         : "Profesor Julián");
 
   if (subjectMode === "mathematics") {
@@ -817,6 +893,47 @@ function buildTutorConfig() {
     };
   }
 
+  if (subjectMode === "natural_sciences") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "Ciencias Naturales y Educación Ambiental",
+      pageTitle: "Tutor de Ciencias Naturales Embebible",
+      heroEyebrow: "Tutor IA de Ciencias Naturales",
+      heroLead:
+        "Explicaciones claras, apoyo en proyectos transversales, aclaración de dudas, ideas de investigación escolar y orientación en ciencias naturales y educación ambiental.",
+      heroQuoteText:
+        '"Comprender la naturaleza y cuidar el entorno nos ayuda a pensar mejor, actuar con responsabilidad y construir soluciones para la vida cotidiana."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN CIENCIAS NATURALES",
+      avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/hjYGs0F0/PROFE-ANDRES-CIENCIAS-NATURALES.png",
+      avatarAlt: "Avatar del profesor de ciencias naturales",
+      chatEyebrow: "Aula interactiva",
+      timerKicker: "Tiempo de trabajo",
+      timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+      topicLabel: "Tema",
+      goalLabel: "Objetivo",
+      defaultTopic: "Ciencias naturales y ambiente",
+      defaultLearningGoal: "Comprender el tema, aclarar dudas y desarrollar ideas de proyecto",
+      messagePlaceholder: "Escribe tu duda de ciencias naturales aquí...",
+      helperText:
+        "Consejo: pide explicaciones, ideas de proyectos, quizzes, análisis de imágenes o apoyo para educación ambiental.",
+      welcomeMessage:
+        "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, proyectos transversales, resolución de dudas e ideas relacionadas con Ciencias Naturales y Educación Ambiental. Este tutor trabaja solo dentro de esta asignatura.",
+      suggestedPrompts: [
+        "Explícame ecosistemas y cadenas alimenticias de forma sencilla",
+        "Ayúdame con una idea de proyecto ambiental para el colegio",
+        "Hazme un quiz rápido sobre células y funciones vitales",
+        "Explícame estados de la materia con ejemplos cotidianos",
+        "Quiero entender fotosíntesis y respiración celular",
+        "Ayúdame a preparar una exposición sobre reciclaje y sostenibilidad",
+        "Explícame mezclas, soluciones y cambios químicos",
+        "Dame ideas para un proyecto transversal de huerta escolar",
+        "Explícame biodiversidad en Colombia y su importancia",
+        "Aclárame una duda sobre el método científico"
+      ]
+    };
+  }
+
   return {
     schoolName,
     tutorName,
@@ -864,6 +981,9 @@ function getSubjectMode() {
   }
   if (["social", "sociales", "social_studies", "ciencias sociales", "ciencias_sociales"].includes(value)) {
     return "social_studies";
+  }
+  if (["natural", "naturales", "natural_sciences", "ciencias naturales", "ciencias_naturales"].includes(value)) {
+    return "natural_sciences";
   }
   return "physics";
 }
@@ -944,6 +1064,46 @@ Formato recomendado:
 - Contexto
 - Explicacion
 - Comparación, línea de tiempo o ejemplo
+- Siguiente paso sugerido`;
+  }
+
+  if (subjectMode === "natural_sciences") {
+    return `Eres Profesor Andrés, un tutor virtual de ciencias naturales y educación ambiental para bachillerato en Colombia.
+
+Tu estilo:
+- Explica con claridad, cercania y precision.
+- Usa espanol claro y natural.
+- Adapta el nivel desde 6° hasta 11°.
+- Prioriza comprensión científica escolar, pensamiento investigativo y cuidado del ambiente.
+
+Reglas pedagogicas:
+- Responde de forma ordenada y breve cuando la pregunta sea simple.
+- Si el estudiante pide una tarea, proyecto o exposición, ayuda a estructurarlo.
+- Si detectas confusión, aclara primero la idea clave.
+- Usa ejemplos cotidianos, procesos naturales y observaciones sencillas cuando ayuden.
+- Si el estudiante pide quiz, formula preguntas adecuadas al grado.
+- Si revisas imágenes o PDFs, describe lo relevante y explica el concepto natural o ambiental asociado.
+- Atiendes solamente temas de ciencias naturales y educación ambiental. Si preguntan por otra asignatura, responde brevemente que este tutor solo trabaja ciencias naturales y ofrece reconducir la consulta a un tema natural o ambiental relacionado.
+- Puedes apoyar proyectos transversales escolares con enfoque pedagógico y ambiental.
+- No respondas matemáticas, ciencias sociales ni otras asignaturas fuera del área.
+
+Temas frecuentes:
+- Ecosistemas
+- Célula y seres vivos
+- Fotosíntesis y respiración
+- Biodiversidad
+- Cuidado del ambiente
+- Reciclaje y sostenibilidad
+- Método científico
+- Materia y sus cambios
+- Mezclas y soluciones
+- Proyectos escolares ambientales
+
+Formato recomendado:
+- Idea clave
+- Explicacion
+- Ejemplo o proceso
+- Aplicación escolar o ambiental
 - Siguiente paso sugerido`;
   }
 
