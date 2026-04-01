@@ -285,16 +285,53 @@ function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
           ? "Ciencias Naturales y Educación Ambiental"
           : "Física";
 
-  const guidance =
-    subjectMode === "mathematics"
-      ? "En Matemáticas sí puedo mostrar gráficas exactas cuando estén soportadas, como seno y coseno."
-      : "Si necesitas rigor visual, puedo analizar una imagen real que subas o darte una descripción/verificación textual exacta.";
-
   return {
-    type: "text",
+    type: "image",
     reply:
-      `Para enseñar con rigor en ${subjectLabel}, no voy a mostrar una imagen libre que pueda inventar formas o datos incorrectos. ${guidance} Si quieres, sube una imagen real para analizarla o pídeme una explicación precisa del esquema, proceso o fenómeno que necesitas.`
+      subjectMode === "mathematics"
+        ? "Puedo generar imágenes exactas para funciones matemáticas soportadas y, si el tema no está soportado todavía, te entrego una lámina visual segura sin inventar resultados."
+        : `Aquí tienes una lámina visual segura sobre tu solicitud de ${subjectLabel}. La imagen no inventa hechos: resume el tema pedido y te orienta sobre cómo estudiarlo o qué referencia real conviene aportar.`,
+    images: [
+      {
+        kind: "generated",
+        src: buildSafeVisualCardDataUrl({ subjectLabel, prompt }),
+        alt: `Lámina visual segura sobre ${subjectLabel}`
+      }
+    ]
   };
+}
+
+function buildSafeVisualCardDataUrl({ subjectLabel, prompt }) {
+  const title = escapeXml(subjectLabel.toUpperCase());
+  const topic = escapeXml(String(prompt || "Solicitud visual").slice(0, 220));
+  const recommendation =
+    subjectLabel === "Matemáticas"
+      ? "Si quieres exactitud gráfica total, pide la función concreta: por ejemplo y = sen(x), y = cos(x) o ambas superpuestas."
+      : "Para análisis factual riguroso, sube una imagen o captura real y el tutor la interpretará sin inventar contenido.";
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+      <rect width="100%" height="100%" fill="#f8fbff" />
+      <rect x="48" y="48" width="1104" height="624" rx="28" fill="#ffffff" stroke="#d7e4f4" stroke-width="3" />
+      <text x="90" y="120" font-size="28" font-family="Arial, sans-serif" letter-spacing="3" fill="#1d4f84">LÁMINA VISUAL SEGURA</text>
+      <text x="90" y="190" font-size="54" font-weight="700" font-family="Arial, sans-serif" fill="#132238">${title}</text>
+      <text x="90" y="280" font-size="24" font-family="Arial, sans-serif" fill="#44556d">Solicitud del estudiante</text>
+      <foreignObject x="90" y="300" width="1010" height="130">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 34px; color: #132238; line-height: 1.3; word-break: break-word;">
+          ${topic}
+        </div>
+      </foreignObject>
+      <rect x="90" y="470" width="1010" height="140" rx="20" fill="#eef5fc" stroke="#cbdcf0" stroke-width="2" />
+      <text x="120" y="520" font-size="24" font-family="Arial, sans-serif" fill="#1d4f84">Uso pedagógico</text>
+      <foreignObject x="120" y="540" width="950" height="56">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 24px; color: #223247; line-height: 1.35; word-break: break-word;">
+          ${escapeXml(recommendation)}
+        </div>
+      </foreignObject>
+    </svg>
+  `.trim();
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function tryGenerateMathDiagram(prompt) {
@@ -304,6 +341,11 @@ function tryGenerateMathDiagram(prompt) {
   }
 
   const asksForGraph =
+    normalized.includes("dibuja") ||
+    normalized.includes("dibujar") ||
+    normalized.includes("traza") ||
+    normalized.includes("trazar") ||
+    normalized.includes("muestra") ||
     normalized.includes("funcion") ||
     normalized.includes("grafica") ||
     normalized.includes("grafico") ||
@@ -341,6 +383,7 @@ function tryGenerateMathDiagram(prompt) {
   }
 
   if (
+    ((normalized.includes("coseno") || normalized.includes("cos(") || normalized.includes("cos x")) && asksForGraph) ||
     normalized.includes("funcion coseno") ||
     normalized.includes("grafica coseno") ||
     normalized.includes("grafica de coseno") ||
@@ -1104,6 +1147,15 @@ function normalizeText(text) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function escapeXml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function shouldGenerateImage(text) {
