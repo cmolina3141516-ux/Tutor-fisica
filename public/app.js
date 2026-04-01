@@ -886,7 +886,7 @@ async function readImagesFromClipboardApi() {
 }
 
 function getTrimmedHistory(messages) {
-  const maxMessages = 6;
+  const maxMessages = 14;
   if (!Array.isArray(messages) || messages.length <= maxMessages) {
     return Array.isArray(messages) ? messages : [];
   }

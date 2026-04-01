@@ -62,6 +62,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (kind === "sine-cosine") {
+      sendSvg(res, buildSineCosineSvgMarkup());
+      return;
+    }
+
     sendJson(res, 404, { error: "Grafica no disponible." });
     return;
   }
@@ -102,46 +107,48 @@ async function generateTutorReply(payload) {
   const isQuizMode = payload.session?.mode === "quiz";
   const latestUserTurn = getLatestUserTurn(history);
   const latestUserMessage = getLatestUserMessage(history);
+  const effectiveUserMessage = resolveEffectiveUserMessage(history);
+  const conversationMemory = buildConversationMemory(history);
   const hasLatestAttachments = hasAttachments(latestUserTurn);
   const hasLatestImageAttachment = hasImageAttachment(latestUserTurn);
   const hasLatestPdfAttachment = hasPdfAttachment(latestUserTurn);
   const subjectMode = getSubjectMode();
-  if (subjectMode === "mathematics" && shouldRejectAsNonMath(latestUserMessage)) {
+  if (subjectMode === "mathematics" && shouldRejectAsNonMath(effectiveUserMessage)) {
     return {
       type: "text",
       reply:
         "Soy el profesor Esteban y este tutor trabaja solo Matemáticas. Si quieres, reformula tu consulta hacia un tema matemático como álgebra, geometría, funciones, probabilidad, trigonometría o cálculo básico."
     };
   }
-  if (subjectMode === "social_studies" && shouldRejectAsNonSocialStudies(latestUserMessage)) {
+  if (subjectMode === "social_studies" && shouldRejectAsNonSocialStudies(effectiveUserMessage)) {
     return {
       type: "text",
       reply:
         "Soy la profesora Laura y este tutor trabaja solo Ciencias Sociales. Si quieres, puedo ayudarte con historia, geografía, ciudadanía, constitución política, economía básica o análisis social escolar."
     };
   }
-  if (subjectMode === "natural_sciences" && shouldRejectAsNonNaturalSciences(latestUserMessage)) {
+  if (subjectMode === "natural_sciences" && shouldRejectAsNonNaturalSciences(effectiveUserMessage)) {
     return {
       type: "text",
       reply:
         "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Educación Ambiental. Si quieres, puedo ayudarte con ecosistemas, célula, biodiversidad, ambiente, método científico, materia y proyectos escolares ambientales."
     };
   }
-  const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
-  const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(latestUserMessage) : null;
+  const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(effectiveUserMessage);
+  const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(effectiveUserMessage) : null;
   if (mathDiagram && !isQuizMode) {
     return mathDiagram;
   }
   if (wantsImage && !isQuizMode && !hasLatestAttachments) {
     return buildVerifiedImageOnlyReply({
       subjectMode,
-      prompt: latestUserMessage || "Genera una imagen educativa."
+      prompt: effectiveUserMessage || "Genera una imagen educativa."
     });
   }
 
   const systemText = isQuizMode
-    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}${buildAttachmentPriorityInstructions({
+    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
+    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.${buildAttachmentPriorityInstructions({
         hasLatestAttachments,
         hasLatestImageAttachment,
         hasLatestPdfAttachment
@@ -304,6 +311,21 @@ function tryGenerateMathDiagram(prompt) {
     normalized.includes("ejes") ||
     normalized.includes("plano cartesiano");
 
+  const asksForBothTrigCurves =
+    (normalized.includes("seno") || normalized.includes("sen(") || normalized.includes("sin")) &&
+    normalized.includes("cos") &&
+    (normalized.includes("dos curvas") ||
+      normalized.includes("ambas") ||
+      normalized.includes("superpuestas") ||
+      normalized.includes("superpuestas") ||
+      normalized.includes("las dos") ||
+      normalized.includes("juntas") ||
+      asksForGraph);
+
+  if (asksForBothTrigCurves) {
+    return buildSineCosineGraphAnswer();
+  }
+
   if (
     ((normalized.includes("seno") && !normalized.includes("coseno")) && asksForGraph) ||
     normalized.includes("funcion seno") ||
@@ -357,6 +379,21 @@ function buildCosineGraphAnswer() {
         kind: "generated",
         src: "/api/math-graph?kind=cosine",
         alt: "Gráfica precisa de la función coseno"
+      }
+    ]
+  };
+}
+
+function buildSineCosineGraphAnswer() {
+  return {
+    type: "image",
+    reply:
+      "Aquí tienes las dos curvas superpuestas: y = sen(x) y y = cos(x), con detalles en ambos ejes. Así puedes comparar mejor sus cruces, máximos, mínimos y desfase de π/2.",
+    images: [
+      {
+        kind: "generated",
+        src: "/api/math-graph?kind=sine-cosine",
+        alt: "Gráfica comparativa de seno y coseno"
       }
     ]
   };
@@ -482,6 +519,217 @@ function buildTrigSvgMarkup({ title, formula, fn }) {
       ${pointMarkersSvg}
     </svg>
   `.trim();
+}
+
+function buildSineCosineSvgMarkup() {
+  const width = 1200;
+  const height = 720;
+  const marginLeft = 90;
+  const marginRight = 70;
+  const marginTop = 90;
+  const marginBottom = 95;
+  const plotWidth = width - marginLeft - marginRight;
+  const plotHeight = height - marginTop - marginBottom;
+  const xMin = -2 * Math.PI;
+  const xMax = 2 * Math.PI;
+  const yMin = -1.2;
+  const yMax = 1.2;
+
+  const xToSvg = (x) => marginLeft + ((x - xMin) / (xMax - xMin)) * plotWidth;
+  const yToSvg = (y) => marginTop + ((yMax - y) / (yMax - yMin)) * plotHeight;
+
+  const makePoints = (fn) => {
+    const points = [];
+    const steps = 300;
+    for (let index = 0; index <= steps; index += 1) {
+      const x = xMin + ((xMax - xMin) * index) / steps;
+      points.push(`${xToSvg(x).toFixed(2)},${yToSvg(fn(x)).toFixed(2)}`);
+    }
+    return points.join(" ");
+  };
+
+  const xAxisY = yToSvg(0);
+  const yAxisX = xToSvg(0);
+  const tickXs = [
+    { value: -2 * Math.PI, label: "−2π" },
+    { value: -1.5 * Math.PI, label: "−3π/2" },
+    { value: -Math.PI, label: "−π" },
+    { value: -0.5 * Math.PI, label: "−π/2" },
+    { value: 0, label: "0" },
+    { value: 0.5 * Math.PI, label: "π/2" },
+    { value: Math.PI, label: "π" },
+    { value: 1.5 * Math.PI, label: "3π/2" },
+    { value: 2 * Math.PI, label: "2π" }
+  ];
+  const tickYs = [
+    { value: 1, label: "1" },
+    { value: 0, label: "0" },
+    { value: -1, label: "−1" }
+  ];
+
+  const verticalGuidesSvg = tickXs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const x = xToSvg(value);
+      return `<line x1="${x}" y1="${marginTop}" x2="${x}" y2="${height - marginBottom}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const horizontalGuidesSvg = tickYs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const y = yToSvg(value);
+      return `<line x1="${marginLeft}" y1="${y}" x2="${width - marginRight}" y2="${y}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const xTicksSvg = tickXs
+    .map(({ value, label }) => {
+      const x = xToSvg(value);
+      return `
+        <line x1="${x}" y1="${xAxisY - 10}" x2="${x}" y2="${xAxisY + 10}" stroke="#1b2230" stroke-width="2" />
+        <text x="${x}" y="${xAxisY + 48}" text-anchor="middle" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  const yTicksSvg = tickYs
+    .map(({ value, label }) => {
+      const y = yToSvg(value);
+      const textX = value === 0 ? yAxisX + 24 : yAxisX - 20;
+      const anchor = value === 0 ? "start" : "end";
+      return `
+        <line x1="${yAxisX - 10}" y1="${y}" x2="${yAxisX + 10}" y2="${y}" stroke="#1b2230" stroke-width="2" />
+        <text x="${textX}" y="${y + 10}" text-anchor="${anchor}" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="#ffffff" />
+      <text x="${width / 2}" y="48" text-anchor="middle" font-size="42" font-weight="700" font-family="Arial, sans-serif" fill="#111111">SENO Y COSENO</text>
+      <text x="${width - 370}" y="150" text-anchor="start" font-size="30" font-family="Georgia, serif" fill="#0f172a">sen(x)</text>
+      <line x1="${width - 470}" y1="140" x2="${width - 390}" y2="140" stroke="#0f172a" stroke-width="5" />
+      <text x="${width - 370}" y="195" text-anchor="start" font-size="30" font-family="Georgia, serif" fill="#2563eb">cos(x)</text>
+      <line x1="${width - 470}" y1="185" x2="${width - 390}" y2="185" stroke="#2563eb" stroke-width="5" />
+
+      ${verticalGuidesSvg}
+      ${horizontalGuidesSvg}
+
+      <line x1="${marginLeft - 10}" y1="${xAxisY}" x2="${width - marginRight + 18}" y2="${xAxisY}" stroke="#111827" stroke-width="3" />
+      <polygon points="${width - marginRight + 18},${xAxisY} ${width - marginRight - 6},${xAxisY - 10} ${width - marginRight - 6},${xAxisY + 10}" fill="#111827" />
+
+      <line x1="${yAxisX}" y1="${height - marginBottom + 10}" x2="${yAxisX}" y2="${marginTop - 18}" stroke="#111827" stroke-width="3" />
+      <polygon points="${yAxisX},${marginTop - 18} ${yAxisX - 10},${marginTop + 6} ${yAxisX + 10},${marginTop + 6}" fill="#111827" />
+
+      ${xTicksSvg}
+      ${yTicksSvg}
+
+      <polyline fill="none" stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${makePoints(Math.sin)}" />
+      <polyline fill="none" stroke="#2563eb" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${makePoints(Math.cos)}" />
+    </svg>
+  `.trim();
+}
+
+function buildConversationMemory(history) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return "No hay turnos previos relevantes.";
+  }
+
+  const recentTurns = history
+    .slice(-8)
+    .map((message) => {
+      const role = message?.role === "assistant" ? "Profesor" : "Estudiante";
+      const text = String(message?.content || "").replace(/\s+/g, " ").trim();
+      if (!text) {
+        return null;
+      }
+      return `- ${role}: ${text}`;
+    })
+    .filter(Boolean);
+
+  return recentTurns.length ? recentTurns.join("\n") : "No hay turnos previos relevantes.";
+}
+
+function getLatestAssistantMessage(history) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message?.role === "assistant" && typeof message.content === "string") {
+      return message.content;
+    }
+  }
+
+  return "";
+}
+
+function getPreviousUserMessage(history) {
+  let foundLatest = false;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message?.role !== "user" || typeof message.content !== "string") {
+      continue;
+    }
+
+    if (!foundLatest) {
+      foundLatest = true;
+      continue;
+    }
+
+    return message.content;
+  }
+
+  return "";
+}
+
+function resolveEffectiveUserMessage(history) {
+  const latestUserMessage = getLatestUserMessage(history);
+  const normalizedLatest = normalizeText(latestUserMessage);
+  if (!normalizedLatest) {
+    return latestUserMessage;
+  }
+
+  const lastAssistantMessage = getLatestAssistantMessage(history);
+  const previousUserMessage = getPreviousUserMessage(history);
+
+  const deicticCues = [
+    "hazlo",
+    "continua",
+    "continúa",
+    "como dijiste",
+    "eso",
+    "esa",
+    "ese",
+    "esas",
+    "esos",
+    "dibujalas",
+    "dibujalos",
+    "dibujalas",
+    "dibujalas",
+    "dibujalas y dame la imagen",
+    "las dos",
+    "ambas",
+    "superpuestas",
+    "ejecutalo",
+    "ejecútalo",
+    "por favor dibuja"
+  ];
+
+  const looksImplicit =
+    normalizedLatest.length < 180 &&
+    deicticCues.some((cue) => normalizedLatest.includes(normalizeText(cue)));
+
+  if (!looksImplicit || !lastAssistantMessage) {
+    return latestUserMessage;
+  }
+
+  return [
+    `Contexto inmediato de la conversación: ${lastAssistantMessage}`,
+    previousUserMessage ? `Pedido anterior del estudiante: ${previousUserMessage}` : "",
+    `Nueva instrucción del estudiante: ${latestUserMessage}`
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildStudentContext(session) {
