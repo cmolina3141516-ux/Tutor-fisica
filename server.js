@@ -70,7 +70,11 @@ async function generateTutorReply(payload) {
   const history = Array.isArray(payload.messages) ? payload.messages : [];
   const studentContext = buildStudentContext(payload.session || {});
   const isQuizMode = payload.session?.mode === "quiz";
+  const latestUserTurn = getLatestUserTurn(history);
   const latestUserMessage = getLatestUserMessage(history);
+  const hasLatestAttachments = hasAttachments(latestUserTurn);
+  const hasLatestImageAttachment = hasImageAttachment(latestUserTurn);
+  const hasLatestPdfAttachment = hasPdfAttachment(latestUserTurn);
   const subjectMode = getSubjectMode();
   if (subjectMode === "mathematics" && shouldRejectAsNonMath(latestUserMessage)) {
     return {
@@ -94,7 +98,7 @@ async function generateTutorReply(payload) {
     };
   }
   const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
-  if (wantsImage && !isQuizMode) {
+  if (wantsImage && !isQuizMode && !hasLatestAttachments) {
     return generateImageAnswer({
       apiKey,
       history,
@@ -105,7 +109,11 @@ async function generateTutorReply(payload) {
 
   const systemText = isQuizMode
     ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}`;
+    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}${buildAttachmentPriorityInstructions({
+        hasLatestAttachments,
+        hasLatestImageAttachment,
+        hasLatestPdfAttachment
+      })}`;
   const input = [
     {
       role: "system",
@@ -493,6 +501,71 @@ function getLatestUserMessage(history) {
   }
 
   return "";
+}
+
+function getLatestUserTurn(history) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message?.role === "user") {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+function hasAttachments(message) {
+  return Boolean(message && Array.isArray(message.attachments) && message.attachments.length);
+}
+
+function hasImageAttachment(message) {
+  if (!hasAttachments(message)) {
+    return false;
+  }
+
+  return message.attachments.some((attachment) => attachment?.mimeType?.startsWith("image/"));
+}
+
+function hasPdfAttachment(message) {
+  if (!hasAttachments(message)) {
+    return false;
+  }
+
+  return message.attachments.some((attachment) => attachment?.mimeType === "application/pdf");
+}
+
+function buildAttachmentPriorityInstructions({ hasLatestAttachments, hasLatestImageAttachment, hasLatestPdfAttachment }) {
+  if (!hasLatestAttachments) {
+    return "";
+  }
+
+  const lines = [
+    "",
+    "Instrucciones obligatorias para este turno con adjuntos:",
+    "- El estudiante sí adjuntó material en este turno.",
+    "- Prioriza el análisis del adjunto por encima del tema por defecto o del contexto general.",
+    "- Describe solo lo que realmente pueda inferirse del archivo adjunto.",
+    "- No inventes escenas, periodos históricos, conceptos o elementos no visibles.",
+    "- Si la imagen o el documento no permite identificar con certeza un hecho específico, dilo con prudencia y limita la respuesta a lo observable."
+  ];
+
+  if (hasLatestImageAttachment) {
+    lines.push(
+      "- Hay una imagen adjunta: analiza primero lo visible en la imagen.",
+      "- No respondas como si faltara la imagen.",
+      "- No supongas que la imagen representa otro evento distinto solo por el tema escrito en la sesión."
+    );
+  }
+
+  if (hasLatestPdfAttachment) {
+    lines.push(
+      "- Hay un PDF adjunto: analiza primero el contenido real del documento antes de usar contexto general."
+    );
+  }
+
+  lines.push("- Si el usuario pide identificar o describir la imagen, tu respuesta debe basarse principalmente en lo observable.");
+
+  return `\n\n${lines.join("\n")}`;
 }
 
 function shouldRejectAsNonMath(text) {
