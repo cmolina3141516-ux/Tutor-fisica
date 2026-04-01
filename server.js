@@ -127,6 +127,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (kind === "polynomial") {
+      const degreeParam = Number(url.searchParams.get("degree"));
+      const degree = Number.isInteger(degreeParam) ? degreeParam : 5;
+      sendSvg(res, buildPolynomialGraphSvgMarkup(degree));
+      return;
+    }
+
     sendJson(res, 404, { error: "Grafica no disponible." });
     return;
   }
@@ -198,6 +205,25 @@ async function generateTutorReply(payload) {
   const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(effectiveUserMessage) : null;
   if (mathDiagram && !isQuizMode) {
     return mathDiagram;
+  }
+  if (subjectMode === "mathematics" && wantsImage && hasLatestImageAttachment && !isQuizMode) {
+    const inferredMathDiagram = await inferMathDiagramFromLatestImage({
+      apiKey,
+      latestUserTurn,
+      userMessage: effectiveUserMessage || latestUserMessage
+    });
+    if (inferredMathDiagram) {
+      return inferredMathDiagram;
+    }
+  }
+  if (subjectMode === "mathematics" && wantsImage && !isQuizMode) {
+    const universalMathDiagram = await tryGenerateUniversalMathGraphAnswer({
+      apiKey,
+      prompt: effectiveUserMessage || latestUserMessage
+    });
+    if (universalMathDiagram) {
+      return universalMathDiagram;
+    }
   }
   if (wantsImage && !isQuizMode && !hasLatestAttachments) {
     return buildVerifiedImageOnlyReply({
@@ -366,7 +392,7 @@ function buildSafeVisualCardDataUrl({ subjectLabel, prompt }) {
   const topic = escapeXml(String(prompt || "Solicitud visual").slice(0, 220));
   const recommendation =
     subjectLabel === "Matemáticas"
-      ? "Pide la función concreta para obtener una gráfica exacta: lineal, cuadrática, cúbica, valor absoluto, raíz, exponencial, logarítmica, racional, seno, coseno o tangente."
+      ? "Pide la función concreta para obtener una gráfica exacta: lineal, cuadrática, cúbica, polinómica de grado n, valor absoluto, raíz, exponencial, logarítmica, racional, seno, coseno, tangente, cotangente, secante o cosecante."
       : "Para análisis factual riguroso, sube una imagen o captura real y el tutor la interpretará sin inventar contenido.";
 
   const svg = `
@@ -426,6 +452,11 @@ function tryGenerateMathDiagram(prompt) {
 
   if (asksForBothTrigCurves) {
     return buildSineCosineGraphAnswer();
+  }
+
+  const polynomialDegree = parsePolynomialDegree(normalized);
+  if (polynomialDegree !== null && asksForGraph) {
+    return buildPolynomialGraphAnswer(polynomialDegree);
   }
 
   if (
@@ -630,6 +661,478 @@ function buildNamedMathGraphAnswer(kind) {
       }
     ]
   };
+}
+
+function buildPolynomialGraphAnswer(degree) {
+  const clampedDegree = Math.max(1, Math.min(12, Number(degree) || 5));
+  return {
+    type: "image",
+    reply: `Aquí tienes una gráfica exacta de una función polinómica de grado ${clampedDegree}, usando la referencia y = x^${clampedDegree}, con escalas claras en ambos ejes.`,
+    images: [
+      {
+        kind: "generated",
+        src: `/api/math-graph?kind=polynomial&degree=${clampedDegree}`,
+        alt: `Gráfica exacta de una función polinómica de grado ${clampedDegree}`
+      }
+    ]
+  };
+}
+
+async function inferMathDiagramFromLatestImage({ apiKey, latestUserTurn, userMessage }) {
+  const imageDataUrl = getFirstImageDataUrlFromTurn(latestUserTurn);
+  if (!imageDataUrl) {
+    return null;
+  }
+
+  const instruction =
+    "Clasifica la función más probable mostrada en la imagen y responde SOLO JSON válido con este formato: " +
+    '{"kind":"sine|cosine|sine-cosine|tangent|cotangent|secant|cosecant|linear|quadratic|cubic|absolute|square-root|exponential|logarithmic|reciprocal|polynomial|unknown","degree":5,"confidence":0.0}. ' +
+    "No agregues texto fuera del JSON. Si no es seguro, usa kind=unknown.";
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        reasoning: { effort: "low" },
+        text: { verbosity: "low" },
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: instruction },
+              { type: "input_text", text: `Pedido del estudiante: ${String(userMessage || "")}` },
+              { type: "input_image", image_url: imageDataUrl, detail: "auto" }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const raw = extractOutputText(data);
+    const parsed = parseMathFamilyJson(raw);
+    if (!parsed || parsed.kind === "unknown") {
+      return null;
+    }
+
+    if (typeof parsed.confidence === "number" && parsed.confidence < 0.45) {
+      return null;
+    }
+
+    if (parsed.kind === "polynomial") {
+      return buildPolynomialGraphAnswer(parsed.degree || 5);
+    }
+
+    if (parsed.kind === "sine") return buildSineGraphAnswer();
+    if (parsed.kind === "cosine") return buildCosineGraphAnswer();
+    if (parsed.kind === "sine-cosine") return buildSineCosineGraphAnswer();
+
+    return buildNamedMathGraphAnswer(parsed.kind);
+  } catch (error) {
+    return null;
+  }
+}
+
+function getFirstImageDataUrlFromTurn(message) {
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  for (const attachment of attachments) {
+    if (attachment?.mimeType?.startsWith("image/") && typeof attachment.dataUrl === "string") {
+      return attachment.dataUrl;
+    }
+  }
+
+  return null;
+}
+
+function parseMathFamilyJson(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    const kind = String(parsed.kind || "").trim().toLowerCase();
+    if (!kind) {
+      return null;
+    }
+    return {
+      kind,
+      degree: Number(parsed.degree) || null,
+      confidence: Number(parsed.confidence)
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+async function tryGenerateUniversalMathGraphAnswer({ apiKey, prompt }) {
+  const normalized = normalizeText(prompt);
+  const asksForGraph =
+    normalized.includes("grafica") ||
+    normalized.includes("grafico") ||
+    normalized.includes("dibuja") ||
+    normalized.includes("traza") ||
+    normalized.includes("curva") ||
+    normalized.includes("funcion");
+
+  if (!asksForGraph) {
+    return null;
+  }
+
+  const instruction =
+    "Convierte la solicitud del estudiante a una especificación de gráfica matemática exacta y responde SOLO JSON válido. " +
+    'Formato: {"title":"string","xMin":-10,"xMax":10,"series":[{"label":"string","expression":"string"}]}. ' +
+    "Reglas: usa 1 a 3 series, expresiones explícitas en x, operadores + - * / ^ y funciones permitidas sin, cos, tan, abs, sqrt, exp, ln, log. " +
+    "Si pide comparación o transformación, incluye varias series. No inventes texto fuera del JSON.";
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        reasoning: { effort: "low" },
+        text: { verbosity: "low" },
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: instruction },
+              { type: "input_text", text: `Solicitud: ${String(prompt || "")}` }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const parsed = parseUniversalGraphSpec(extractOutputText(data));
+    if (!parsed) {
+      return null;
+    }
+
+    const svg = buildUniversalFunctionGraphSvgMarkup(parsed);
+    if (!svg) {
+      return null;
+    }
+
+    return {
+      type: "image",
+      reply: "Aquí tienes la gráfica solicitada con ejes y escalas definidas.",
+      images: [
+        {
+          kind: "generated",
+          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+          alt: "Gráfica matemática generada de forma exacta"
+        }
+      ]
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseUniversalGraphSpec(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    const xMin = Number(parsed.xMin);
+    const xMax = Number(parsed.xMax);
+    const series = Array.isArray(parsed.series) ? parsed.series : [];
+    if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMax <= xMin || !series.length) {
+      return null;
+    }
+
+    const normalizedSeries = series
+      .map((item) => ({
+        label: String(item?.label || "f(x)"),
+        expression: String(item?.expression || "").trim()
+      }))
+      .filter((item) => item.expression);
+
+    if (!normalizedSeries.length) {
+      return null;
+    }
+
+    return {
+      title: String(parsed.title || "GRÁFICA DE FUNCIONES"),
+      xMin,
+      xMax,
+      series: normalizedSeries.slice(0, 3)
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function buildUniversalFunctionGraphSvgMarkup(spec) {
+  const width = 1200;
+  const height = 720;
+  const marginLeft = 90;
+  const marginRight = 70;
+  const marginTop = 90;
+  const marginBottom = 95;
+  const plotWidth = width - marginLeft - marginRight;
+  const plotHeight = height - marginTop - marginBottom;
+
+  const compiled = spec.series
+    .map((series, index) => {
+      const fn = compileMathExpression(series.expression);
+      if (!fn) {
+        return null;
+      }
+      return {
+        ...series,
+        color: ["#0f172a", "#2563eb", "#be123c"][index] || "#0f172a",
+        fn
+      };
+    })
+    .filter(Boolean);
+
+  if (!compiled.length) {
+    return null;
+  }
+
+  const samplesBySeries = [];
+  let yMin = Number.POSITIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+
+  for (const series of compiled) {
+    const points = [];
+    let current = [];
+    const steps = 900;
+    for (let i = 0; i <= steps; i += 1) {
+      const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / steps;
+      const y = series.fn(x);
+      if (!Number.isFinite(y) || Math.abs(y) > 1e6) {
+        if (current.length > 1) {
+          points.push(current);
+        }
+        current = [];
+        continue;
+      }
+      yMin = Math.min(yMin, y);
+      yMax = Math.max(yMax, y);
+      current.push([x, y]);
+    }
+    if (current.length > 1) {
+      points.push(current);
+    }
+    samplesBySeries.push({ ...series, points });
+  }
+
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    return null;
+  }
+
+  const yPadding = Math.max((yMax - yMin) * 0.12, 1);
+  yMin -= yPadding;
+  yMax += yPadding;
+  if (yMax <= yMin) {
+    yMin = -10;
+    yMax = 10;
+  }
+
+  const xToSvg = (x) => marginLeft + ((x - spec.xMin) / (spec.xMax - spec.xMin)) * plotWidth;
+  const yToSvg = (y) => marginTop + ((yMax - y) / (yMax - yMin)) * plotHeight;
+  const xAxisY = yMin <= 0 && 0 <= yMax ? yToSvg(0) : yToSvg(yMin);
+  const yAxisX = spec.xMin <= 0 && 0 <= spec.xMax ? xToSvg(0) : xToSvg(spec.xMin);
+
+  const tickXs = buildNumericTicks(spec.xMin, spec.xMax, 7);
+  const tickYs = buildNumericTicks(yMin, yMax, 7);
+
+  const verticalGuidesSvg = tickXs
+    .filter((value) => Math.abs(value) > 1e-9)
+    .map((value) => {
+      const x = xToSvg(value);
+      return `<line x1="${x}" y1="${marginTop}" x2="${x}" y2="${height - marginBottom}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const horizontalGuidesSvg = tickYs
+    .filter((value) => Math.abs(value) > 1e-9)
+    .map((value) => {
+      const y = yToSvg(value);
+      return `<line x1="${marginLeft}" y1="${y}" x2="${width - marginRight}" y2="${y}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const xTicksSvg = tickXs
+    .map((value) => {
+      const x = xToSvg(value);
+      return `
+        <line x1="${x}" y1="${xAxisY - 10}" x2="${x}" y2="${xAxisY + 10}" stroke="#1b2230" stroke-width="2" />
+        <text x="${x}" y="${xAxisY + 42}" text-anchor="middle" font-size="24" font-family="Georgia, serif" fill="#111827">${formatTick(value)}</text>
+      `;
+    })
+    .join("");
+
+  const yTicksSvg = tickYs
+    .map((value) => {
+      const y = yToSvg(value);
+      const textX = Math.abs(value) < 1e-9 ? yAxisX + 24 : yAxisX - 16;
+      const anchor = Math.abs(value) < 1e-9 ? "start" : "end";
+      return `
+        <line x1="${yAxisX - 10}" y1="${y}" x2="${yAxisX + 10}" y2="${y}" stroke="#1b2230" stroke-width="2" />
+        <text x="${textX}" y="${y + 8}" text-anchor="${anchor}" font-size="24" font-family="Georgia, serif" fill="#111827">${formatTick(value)}</text>
+      `;
+    })
+    .join("");
+
+  const polylinesSvg = samplesBySeries
+    .map((series) =>
+      series.points
+        .map((segment) => {
+          const points = segment.map(([x, y]) => `${xToSvg(x).toFixed(2)},${yToSvg(y).toFixed(2)}`).join(" ");
+          return `<polyline fill="none" stroke="${series.color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" points="${points}" />`;
+        })
+        .join("")
+    )
+    .join("");
+
+  const legendSvg = samplesBySeries
+    .map((series, index) => {
+      const y = 132 + index * 40;
+      return `
+        <line x1="${width - 350}" y1="${y - 8}" x2="${width - 290}" y2="${y - 8}" stroke="${series.color}" stroke-width="5" />
+        <text x="${width - 280}" y="${y}" font-size="23" font-family="Georgia, serif" fill="#111827">${escapeXml(series.label)}</text>
+      `;
+    })
+    .join("");
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="#ffffff" />
+      <text x="${width / 2}" y="48" text-anchor="middle" font-size="42" font-weight="700" font-family="Arial, sans-serif" fill="#111111">${escapeXml(spec.title)}</text>
+      ${legendSvg}
+      ${verticalGuidesSvg}
+      ${horizontalGuidesSvg}
+      <line x1="${marginLeft - 10}" y1="${xAxisY}" x2="${width - marginRight + 18}" y2="${xAxisY}" stroke="#111827" stroke-width="3" />
+      <polygon points="${width - marginRight + 18},${xAxisY} ${width - marginRight - 6},${xAxisY - 10} ${width - marginRight - 6},${xAxisY + 10}" fill="#111827" />
+      <line x1="${yAxisX}" y1="${height - marginBottom + 10}" x2="${yAxisX}" y2="${marginTop - 18}" stroke="#111827" stroke-width="3" />
+      <polygon points="${yAxisX},${marginTop - 18} ${yAxisX - 10},${marginTop + 6} ${yAxisX + 10},${marginTop + 6}" fill="#111827" />
+      ${xTicksSvg}
+      ${yTicksSvg}
+      ${polylinesSvg}
+    </svg>
+  `.trim();
+}
+
+function compileMathExpression(expression) {
+  const raw = String(expression || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const allowedChars = /^[0-9xX+\-*/^().,\sA-Za-z_]+$/;
+  if (!allowedChars.test(raw)) {
+    return null;
+  }
+
+  const lowered = raw.toLowerCase();
+  const normalized = lowered
+    .replace(/sen/g, "sin")
+    .replace(/\bln\(/g, "log(")
+    .replace(/\bpi\b/g, "PI")
+    .replace(/\be\b/g, "E")
+    .replace(/\^/g, "**");
+
+  const tokenMatches = normalized.match(/[a-z_]+/gi) || [];
+  const allowedTokens = new Set([
+    "x",
+    "sin",
+    "cos",
+    "tan",
+    "abs",
+    "sqrt",
+    "exp",
+    "log",
+    "pow",
+    "floor",
+    "ceil",
+    "round",
+    "pi",
+    "e"
+  ]);
+
+  for (const token of tokenMatches) {
+    if (!allowedTokens.has(token.toLowerCase())) {
+      return null;
+    }
+  }
+
+  try {
+    const evaluator = new Function(
+      "x",
+      `"use strict"; const {sin, cos, tan, abs, sqrt, exp, log, pow, floor, ceil, round, PI, E} = Math; return (${normalized});`
+    );
+    return (x) => {
+      const y = evaluator(x);
+      return Number.isFinite(y) ? y : NaN;
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function buildNumericTicks(min, max, count = 7) {
+  const safeCount = Math.max(3, count);
+  const span = max - min;
+  if (!Number.isFinite(span) || span <= 0) {
+    return [min, max];
+  }
+
+  const rawStep = span / (safeCount - 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / magnitude;
+  let nice = 1;
+  if (normalized > 1.5) nice = 2;
+  if (normalized > 3) nice = 5;
+  if (normalized > 7) nice = 10;
+  const step = nice * magnitude;
+
+  const start = Math.ceil(min / step) * step;
+  const ticks = [];
+  for (let value = start; value <= max + step * 0.5; value += step) {
+    ticks.push(Math.round(value * 1e8) / 1e8);
+  }
+  if (!ticks.length) {
+    ticks.push(min, max);
+  }
+  return ticks;
 }
 
 function buildTrigSvgMarkup({ title, formula, fn }) {
@@ -1288,6 +1791,133 @@ function buildFunctionStudyCardSvgMarkup(subjectLabel, prompt) {
   `.trim();
 
   return svg;
+}
+
+function buildPolynomialGraphSvgMarkup(degree) {
+  const clampedDegree = Math.max(1, Math.min(12, Number(degree) || 5));
+  const isOdd = clampedDegree % 2 === 1;
+  const xAbs = clampedDegree <= 4 ? 2 : clampedDegree <= 8 ? 1.6 : 1.4;
+  const xMin = -xAbs;
+  const xMax = xAbs;
+  const yAtEdge = Math.pow(xAbs, clampedDegree);
+  const yPadding = Math.max(1, yAtEdge * 0.08);
+  const yMin = isOdd ? -(yAtEdge + yPadding) : -Math.max(1, yPadding);
+  const yMax = yAtEdge + yPadding;
+
+  const tickXs = [
+    { value: -xAbs, label: formatTick(-xAbs) },
+    { value: -xAbs / 2, label: formatTick(-xAbs / 2) },
+    { value: 0, label: "0" },
+    { value: xAbs / 2, label: formatTick(xAbs / 2) },
+    { value: xAbs, label: formatTick(xAbs) }
+  ];
+
+  const tickYs = [
+    isOdd ? { value: -yAtEdge, label: formatTick(-yAtEdge) } : { value: 0, label: "0" },
+    { value: isOdd ? -yAtEdge / 2 : yAtEdge / 4, label: formatTick(isOdd ? -yAtEdge / 2 : yAtEdge / 4) },
+    { value: 0, label: "0" },
+    { value: yAtEdge / 2, label: formatTick(yAtEdge / 2) },
+    { value: yAtEdge, label: formatTick(yAtEdge) }
+  ];
+
+  return buildFunctionPlotSvgMarkup({
+    title: `FUNCION POLINOMICA (GRADO ${clampedDegree})`,
+    formula: `y = x${toSuperscript(clampedDegree)}`,
+    fn: (x) => Math.pow(x, clampedDegree),
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    color: "#0f172a",
+    tickXs,
+    tickYs
+  });
+}
+
+function parsePolynomialDegree(normalized) {
+  const direct = normalized.match(/grado\s*(?:de\s*)?(\d{1,2})/);
+  if (direct) {
+    const degree = Number(direct[1]);
+    return Number.isInteger(degree) ? degree : null;
+  }
+
+  const ordinalMap = {
+    primer: 1,
+    primero: 1,
+    segunda: 2,
+    segundo: 2,
+    tercer: 3,
+    tercera: 3,
+    tercero: 3,
+    cuarto: 4,
+    cuarta: 4,
+    quinto: 5,
+    quinta: 5,
+    sexto: 6,
+    sexta: 6,
+    septimo: 7,
+    septima: 7,
+    octavo: 8,
+    octava: 8,
+    noveno: 9,
+    novena: 9,
+    decimo: 10,
+    decima: 10,
+    undecimo: 11,
+    undecima: 11,
+    duodecimo: 12,
+    duodecima: 12
+  };
+
+  for (const [word, value] of Object.entries(ordinalMap)) {
+    if (normalized.includes(`${word} grado`) || normalized.includes(`grado ${word}`) || normalized.includes(`de ${word} grado`)) {
+      return value;
+    }
+  }
+
+  if (normalized.includes("polinom") || normalized.includes("funcion de grado")) {
+    return 5;
+  }
+
+  return null;
+}
+
+function toSuperscript(number) {
+  const map = {
+    "0": "⁰",
+    "1": "¹",
+    "2": "²",
+    "3": "³",
+    "4": "⁴",
+    "5": "⁵",
+    "6": "⁶",
+    "7": "⁷",
+    "8": "⁸",
+    "9": "⁹",
+    "-": "⁻"
+  };
+
+  return String(number)
+    .split("")
+    .map((char) => map[char] || char)
+    .join("");
+}
+
+function formatTick(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+
+  if (Math.abs(numeric) >= 100 || (Math.abs(numeric) > 0 && Math.abs(numeric) < 0.01)) {
+    return numeric.toExponential(1);
+  }
+
+  const rounded = Math.round(numeric * 100) / 100;
+  if (Number.isInteger(rounded)) {
+    return String(rounded);
+  }
+  return String(rounded);
 }
 
 function buildConversationMemory(history) {
