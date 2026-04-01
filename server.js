@@ -36,6 +36,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/math-graph") {
+    const kind = String(url.searchParams.get("kind") || "").toLowerCase();
+    if (kind === "sine") {
+      sendSvg(
+        res,
+        buildTrigSvgMarkup({
+          title: "FUNCION SENO",
+          formula: "y = sen(x)",
+          fn: Math.sin
+        })
+      );
+      return;
+    }
+
+    if (kind === "cosine") {
+      sendSvg(
+        res,
+        buildTrigSvgMarkup({
+          title: "FUNCION COSENO",
+          formula: "y = cos(x)",
+          fn: Math.cos
+        })
+      );
+      return;
+    }
+
+    sendJson(res, 404, { error: "Grafica no disponible." });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/chat") {
     try {
       const body = await readJsonBody(req);
@@ -98,12 +128,14 @@ async function generateTutorReply(payload) {
     };
   }
   const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(latestUserMessage);
+  const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(latestUserMessage) : null;
+  if (mathDiagram && !isQuizMode) {
+    return mathDiagram;
+  }
   if (wantsImage && !isQuizMode && !hasLatestAttachments) {
-    return generateImageAnswer({
-      apiKey,
-      history,
-      studentContext,
-      prompt: latestUserMessage || "Genera una imagen educativa de fisica."
+    return buildVerifiedImageOnlyReply({
+      subjectMode,
+      prompt: latestUserMessage || "Genera una imagen educativa."
     });
   }
 
@@ -236,148 +268,220 @@ function extractGeneratedImages(data) {
   return images;
 }
 
-async function generateImageAnswer({ apiKey, history, studentContext, prompt }) {
-  const subjectMode = getSubjectMode();
+function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
   const subjectLabel =
     subjectMode === "mathematics"
-      ? "matematicas"
+      ? "Matemáticas"
       : subjectMode === "social_studies"
-        ? "ciencias sociales"
+        ? "Ciencias Sociales"
         : subjectMode === "natural_sciences"
-          ? "ciencias naturales y educacion ambiental"
-          : "fisica";
-  const imagePrompt = [
-    `Crea una imagen educativa de alta claridad para estudiantes de bachillerato sobre ${subjectLabel}.`,
-    "La imagen debe corresponder exactamente a lo pedido por el estudiante.",
-    "No asumas que el estudiante adjuntó una imagen para analizar; aquí debes generar una imagen nueva desde cero.",
-    "Si el estudiante pide referencias visuales, genera una composición clara con ejemplos representativos del tema.",
-    "La imagen debe verse limpia, profesional, moderna y visualmente realista o tecnicamente pulida segun el tema.",
-    "No devuelvas ASCII, no simules SVG, no hagas texto como dibujo. Debe ser una imagen real.",
-    "Usa fondo claro, composicion ordenada, alto contraste y elementos faciles de distinguir.",
-    "Si el tema requiere diagrama o esquema, genera una representacion limpia, precisa, legible y bien organizada.",
-    "Si el tema es matemático, prioriza gráficas claras, formas geométricas, expresiones limpias y rotulación mínima.",
-    "Si el tema es de física, prioriza diagramas e ilustraciones didácticas con etiquetas mínimas y elegantes.",
-    "Si el tema es de ciencias sociales, prioriza mapas, líneas de tiempo, esquemas institucionales, escenas históricas o gráficos sociales claros y escolares.",
-    "Si el tema es de ciencias naturales, prioriza procesos biológicos, ecosistemas, ilustraciones ambientales, laboratorios escolares o esquemas científicos claros y didácticos.",
-    "Evita ruido, exceso de texto, garabatos o estilo infantil.",
-    "Prioriza exactitud conceptual y limpieza grafica.",
-    `Contexto de sesion:\n${studentContext}`,
-    `Solicitud del estudiante:\n${prompt}`
-  ].join("\n\n");
+          ? "Ciencias Naturales y Educación Ambiental"
+          : "Física";
 
-  const [imageResult, explanationResult] = await Promise.all([
-    fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-image-1",
-        prompt: imagePrompt,
-        size: "1536x1024",
-        quality: "high",
-        output_format: "png"
-      })
-    }),
-    fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
-        input: [
-          {
-            role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: `Eres un tutor de ${subjectLabel} para bachillerato. Ya se generó una imagen nueva a partir de la petición del estudiante. Explica en espanol de forma breve y clara lo que muestra la imagen solicitada y como interpretarla. Nunca digas que no ves una imagen adjunta, nunca pidas que suban una foto y nunca respondas como si faltara un archivo. Usa el siguiente contexto:\n${studentContext}`
-              }
-            ]
-          },
-          ...history
-            .filter((message) => message?.role === "user" && typeof message.content === "string")
-            .slice(-2)
-            .map((message) => ({
-              role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text: String(message.content || "")
-                }
-              ]
-            })),
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: `El estudiante pidio esta imagen: ${prompt}\nDa una explicacion breve en 3 partes: que se ve, concepto principal del tema y una recomendacion corta de estudio.`
-              }
-            ]
-          }
-        ],
-        reasoning: {
-          effort: "low"
-        },
-        text: {
-          verbosity: "low"
-        }
-      })
-    })
-  ]);
-
-  if (!imageResult.ok) {
-    const errorText = await imageResult.text();
-    throw new Error(`OpenAI devolvio ${imageResult.status} al generar la imagen: ${errorText}`);
-  }
-
-  if (!explanationResult.ok) {
-    const errorText = await explanationResult.text();
-    throw new Error(`OpenAI devolvio ${explanationResult.status} al generar la explicacion: ${errorText}`);
-  }
-
-  const imageData = await imageResult.json();
-  const explanationData = await explanationResult.json();
-  const imageBase64 = imageData?.data?.[0]?.b64_json;
-  const rawExplanation = extractOutputText(explanationData) || "";
-  const explanation = sanitizeGeneratedImageExplanation(rawExplanation, prompt);
-
-  if (!imageBase64) {
-    throw new Error("La API de imagenes no devolvio una imagen valida.");
-  }
+  const guidance =
+    subjectMode === "mathematics"
+      ? "En Matemáticas sí puedo mostrar gráficas exactas cuando estén soportadas, como seno y coseno."
+      : "Si necesitas rigor visual, puedo analizar una imagen real que subas o darte una descripción/verificación textual exacta.";
 
   return {
+    type: "text",
+    reply:
+      `Para enseñar con rigor en ${subjectLabel}, no voy a mostrar una imagen libre que pueda inventar formas o datos incorrectos. ${guidance} Si quieres, sube una imagen real para analizarla o pídeme una explicación precisa del esquema, proceso o fenómeno que necesitas.`
+  };
+}
+
+function tryGenerateMathDiagram(prompt) {
+  const normalized = normalizeText(prompt);
+  if (!normalized) {
+    return null;
+  }
+
+  const asksForGraph =
+    normalized.includes("funcion") ||
+    normalized.includes("grafica") ||
+    normalized.includes("grafico") ||
+    normalized.includes("curva") ||
+    normalized.includes("ejes") ||
+    normalized.includes("plano cartesiano");
+
+  if (
+    ((normalized.includes("seno") && !normalized.includes("coseno")) && asksForGraph) ||
+    normalized.includes("funcion seno") ||
+    normalized.includes("funcion sinusoidal") ||
+    normalized.includes("grafica seno") ||
+    normalized.includes("grafica de seno") ||
+    normalized.includes("sin(") ||
+    normalized.includes("y = sin x") ||
+    normalized.includes("y=sinx") ||
+    normalized.includes("sin x")
+  ) {
+    return buildSineGraphAnswer();
+  }
+
+  if (
+    normalized.includes("funcion coseno") ||
+    normalized.includes("grafica coseno") ||
+    normalized.includes("grafica de coseno") ||
+    normalized.includes("y = cos x") ||
+    normalized.includes("y=cosx") ||
+    normalized.includes("cos x")
+  ) {
+    return buildCosineGraphAnswer();
+  }
+
+  return null;
+}
+
+function buildSineGraphAnswer() {
+  return {
     type: "image",
-    reply: explanation,
+    reply:
+      "Aquí tienes una gráfica exacta de y = sen(x), con detalles en ambos ejes. La curva corta el origen, alcanza 1 en π/2 y -1 en 3π/2, y su período es 2π.",
     images: [
       {
         kind: "generated",
-        src: `data:image/png;base64,${imageBase64}`,
-        alt: "Imagen generada por el profesor de fisica"
+        src: "/api/math-graph?kind=sine",
+        alt: "Gráfica precisa de la función seno"
       }
     ]
   };
 }
 
-function sanitizeGeneratedImageExplanation(text, prompt) {
-  const normalized = normalizeText(text);
-  if (
-    !text ||
-    normalized.includes("no veo ninguna imagen") ||
-    normalized.includes("no veo imagen") ||
-    normalized.includes("imagen adjunta") ||
-    normalized.includes("sube la foto") ||
-    normalized.includes("sube la imagen") ||
-    normalized.includes("adjunta la foto")
-  ) {
-    return `Aquí tienes una imagen generada según tu solicitud: ${prompt}. Si quieres, también puedo explicarte lo que se observa o generar una versión más precisa.`;
+function buildCosineGraphAnswer() {
+  return {
+    type: "image",
+    reply:
+      "Aquí tienes una gráfica precisa de la función coseno. Observa que y = cos(x) vale 1 en x = 0, corta el eje x en π/2 y 3π/2, y se repite cada 2π.",
+    images: [
+      {
+        kind: "generated",
+        src: "/api/math-graph?kind=cosine",
+        alt: "Gráfica precisa de la función coseno"
+      }
+    ]
+  };
+}
+
+function buildTrigSvgMarkup({ title, formula, fn }) {
+  const width = 1200;
+  const height = 720;
+  const marginLeft = 90;
+  const marginRight = 70;
+  const marginTop = 90;
+  const marginBottom = 95;
+  const plotWidth = width - marginLeft - marginRight;
+  const plotHeight = height - marginTop - marginBottom;
+  const xMin = -2 * Math.PI;
+  const xMax = 2 * Math.PI;
+  const yMin = -1.2;
+  const yMax = 1.2;
+
+  const xToSvg = (x) => marginLeft + ((x - xMin) / (xMax - xMin)) * plotWidth;
+  const yToSvg = (y) => marginTop + ((yMax - y) / (yMax - yMin)) * plotHeight;
+
+  const points = [];
+  const steps = 300;
+  for (let index = 0; index <= steps; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / steps;
+    const y = fn(x);
+    points.push(`${xToSvg(x).toFixed(2)},${yToSvg(y).toFixed(2)}`);
   }
 
-  return text;
+  const xAxisY = yToSvg(0);
+  const yAxisX = xToSvg(0);
+  const tickXs = [
+    { value: -2 * Math.PI, label: "−2π" },
+    { value: -1.5 * Math.PI, label: "−3π/2" },
+    { value: -Math.PI, label: "−π" },
+    { value: -0.5 * Math.PI, label: "−π/2" },
+    { value: 0, label: "0" },
+    { value: 0.5 * Math.PI, label: "π/2" },
+    { value: Math.PI, label: "π" },
+    { value: 1.5 * Math.PI, label: "3π/2" },
+    { value: 2 * Math.PI, label: "2π" }
+  ];
+  const tickYs = [
+    { value: 1, label: "1" },
+    { value: 0, label: "0" },
+    { value: -1, label: "−1" }
+  ];
+
+  const verticalGuidesSvg = tickXs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const x = xToSvg(value);
+      return `<line x1="${x}" y1="${marginTop}" x2="${x}" y2="${height - marginBottom}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const horizontalGuidesSvg = tickYs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const y = yToSvg(value);
+      return `<line x1="${marginLeft}" y1="${y}" x2="${width - marginRight}" y2="${y}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const xTicksSvg = tickXs
+    .map(({ value, label }) => {
+      const x = xToSvg(value);
+      return `
+        <line x1="${x}" y1="${xAxisY - 10}" x2="${x}" y2="${xAxisY + 10}" stroke="#1b2230" stroke-width="2" />
+        <text x="${x}" y="${xAxisY + 48}" text-anchor="middle" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  const yTicksSvg = tickYs
+    .map(({ value, label }) => {
+      const y = yToSvg(value);
+      const textX = value === 0 ? yAxisX + 24 : yAxisX - 20;
+      const anchor = value === 0 ? "start" : "end";
+      return `
+        <line x1="${yAxisX - 10}" y1="${y}" x2="${yAxisX + 10}" y2="${y}" stroke="#1b2230" stroke-width="2" />
+        <text x="${textX}" y="${y + 10}" text-anchor="${anchor}" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  const keyPoints = [
+    { x: -2 * Math.PI, y: fn(-2 * Math.PI) },
+    { x: -1.5 * Math.PI, y: fn(-1.5 * Math.PI) },
+    { x: -Math.PI, y: fn(-Math.PI) },
+    { x: -0.5 * Math.PI, y: fn(-0.5 * Math.PI) },
+    { x: 0, y: fn(0) },
+    { x: 0.5 * Math.PI, y: fn(0.5 * Math.PI) },
+    { x: Math.PI, y: fn(Math.PI) },
+    { x: 1.5 * Math.PI, y: fn(1.5 * Math.PI) },
+    { x: 2 * Math.PI, y: fn(2 * Math.PI) }
+  ];
+
+  const pointMarkersSvg = keyPoints
+    .map(({ x, y }) => `<circle cx="${xToSvg(x)}" cy="${yToSvg(y)}" r="5.5" fill="#0f172a" />`)
+    .join("");
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="#ffffff" />
+      <text x="${width / 2}" y="48" text-anchor="middle" font-size="42" font-weight="700" font-family="Arial, sans-serif" fill="#111111">${title}</text>
+      <text x="${width - 290}" y="170" text-anchor="start" font-size="34" font-style="italic" font-family="Georgia, serif" fill="#111111">${formula}</text>
+
+      ${verticalGuidesSvg}
+      ${horizontalGuidesSvg}
+
+      <line x1="${marginLeft - 10}" y1="${xAxisY}" x2="${width - marginRight + 18}" y2="${xAxisY}" stroke="#111827" stroke-width="3" />
+      <polygon points="${width - marginRight + 18},${xAxisY} ${width - marginRight - 6},${xAxisY - 10} ${width - marginRight - 6},${xAxisY + 10}" fill="#111827" />
+
+      <line x1="${yAxisX}" y1="${height - marginBottom + 10}" x2="${yAxisX}" y2="${marginTop - 18}" stroke="#111827" stroke-width="3" />
+      <polygon points="${yAxisX},${marginTop - 18} ${yAxisX - 10},${marginTop + 6} ${yAxisX + 10},${marginTop + 6}" fill="#111827" />
+
+      ${xTicksSvg}
+      ${yTicksSvg}
+
+      <polyline fill="none" stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${points.join(" ")}" />
+      ${pointMarkersSvg}
+    </svg>
+  `.trim();
 }
 
 function buildStudentContext(session) {
@@ -849,6 +953,14 @@ function sendJson(res, statusCode, payload) {
     "Cache-Control": "no-store"
   });
   res.end(JSON.stringify(payload));
+}
+
+function sendSvg(res, markup) {
+  res.writeHead(200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(markup);
 }
 
 function readJsonBody(req) {
