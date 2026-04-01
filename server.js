@@ -67,6 +67,66 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (kind === "tangent") {
+      sendSvg(res, buildNamedMathGraphSvg("tangent"));
+      return;
+    }
+
+    if (kind === "cotangent") {
+      sendSvg(res, buildNamedMathGraphSvg("cotangent"));
+      return;
+    }
+
+    if (kind === "secant") {
+      sendSvg(res, buildNamedMathGraphSvg("secant"));
+      return;
+    }
+
+    if (kind === "cosecant") {
+      sendSvg(res, buildNamedMathGraphSvg("cosecant"));
+      return;
+    }
+
+    if (kind === "linear") {
+      sendSvg(res, buildNamedMathGraphSvg("linear"));
+      return;
+    }
+
+    if (kind === "quadratic") {
+      sendSvg(res, buildNamedMathGraphSvg("quadratic"));
+      return;
+    }
+
+    if (kind === "cubic") {
+      sendSvg(res, buildNamedMathGraphSvg("cubic"));
+      return;
+    }
+
+    if (kind === "absolute") {
+      sendSvg(res, buildNamedMathGraphSvg("absolute"));
+      return;
+    }
+
+    if (kind === "square-root") {
+      sendSvg(res, buildNamedMathGraphSvg("square-root"));
+      return;
+    }
+
+    if (kind === "exponential") {
+      sendSvg(res, buildNamedMathGraphSvg("exponential"));
+      return;
+    }
+
+    if (kind === "logarithmic") {
+      sendSvg(res, buildNamedMathGraphSvg("logarithmic"));
+      return;
+    }
+
+    if (kind === "reciprocal") {
+      sendSvg(res, buildNamedMathGraphSvg("reciprocal"));
+      return;
+    }
+
     sendJson(res, 404, { error: "Grafica no disponible." });
     return;
   }
@@ -289,8 +349,8 @@ function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
     type: "image",
     reply:
       subjectMode === "mathematics"
-        ? "Puedo generar imágenes exactas para funciones matemáticas soportadas y, si el tema no está soportado todavía, te entrego una lámina visual segura sin inventar resultados."
-        : `Aquí tienes una lámina visual segura sobre tu solicitud de ${subjectLabel}. La imagen no inventa hechos: resume el tema pedido y te orienta sobre cómo estudiarlo o qué referencia real conviene aportar.`,
+        ? "Aquí tienes una lámina matemática segura. Para funciones reales típicas, la app genera gráficas exactas; para solicitudes no soportadas todavía, entrega una síntesis visual fiel sin inventar resultados."
+        : `Aquí tienes una lámina educativa segura sobre tu solicitud de ${subjectLabel}. Resume el tema pedido de forma visual y fiel, sin inventar hechos ni escenas falsas.`,
     images: [
       {
         kind: "generated",
@@ -306,7 +366,7 @@ function buildSafeVisualCardDataUrl({ subjectLabel, prompt }) {
   const topic = escapeXml(String(prompt || "Solicitud visual").slice(0, 220));
   const recommendation =
     subjectLabel === "Matemáticas"
-      ? "Si quieres exactitud gráfica total, pide la función concreta: por ejemplo y = sen(x), y = cos(x) o ambas superpuestas."
+      ? "Pide la función concreta para obtener una gráfica exacta: lineal, cuadrática, cúbica, valor absoluto, raíz, exponencial, logarítmica, racional, seno, coseno o tangente."
       : "Para análisis factual riguroso, sube una imagen o captura real y el tutor la interpretará sin inventar contenido.";
 
   const svg = `
@@ -394,6 +454,117 @@ function tryGenerateMathDiagram(prompt) {
     return buildCosineGraphAnswer();
   }
 
+  if (
+    ((normalized.includes("tangente") || normalized.includes("tan(") || normalized.includes("tan x")) && asksForGraph) ||
+    normalized.includes("funcion tangente") ||
+    normalized.includes("grafica tangente") ||
+    normalized.includes("grafica de tangente") ||
+    normalized.includes("y = tan x") ||
+    normalized.includes("y=tanx")
+  ) {
+    return buildNamedMathGraphAnswer("tangent");
+  }
+
+  if (
+    ((normalized.includes("cotangente") || normalized.includes("cot(") || normalized.includes("cot x")) && asksForGraph) ||
+    normalized.includes("funcion cotangente") ||
+    normalized.includes("grafica cotangente") ||
+    normalized.includes("grafica de cotangente") ||
+    normalized.includes("y = cot x") ||
+    normalized.includes("y=cotx")
+  ) {
+    return buildNamedMathGraphAnswer("cotangent");
+  }
+
+  if (
+    ((normalized.includes("secante") || normalized.includes("sec(") || normalized.includes("sec x")) && asksForGraph) ||
+    normalized.includes("funcion secante") ||
+    normalized.includes("grafica secante") ||
+    normalized.includes("grafica de secante") ||
+    normalized.includes("y = sec x") ||
+    normalized.includes("y=secx")
+  ) {
+    return buildNamedMathGraphAnswer("secant");
+  }
+
+  if (
+    ((normalized.includes("cosecante") || normalized.includes("csc(") || normalized.includes("csc x")) && asksForGraph) ||
+    normalized.includes("funcion cosecante") ||
+    normalized.includes("grafica cosecante") ||
+    normalized.includes("grafica de cosecante") ||
+    normalized.includes("y = csc x") ||
+    normalized.includes("y=cscx")
+  ) {
+    return buildNamedMathGraphAnswer("cosecant");
+  }
+
+  if (
+    (normalized.includes("lineal") && asksForGraph) ||
+    normalized.includes("recta") ||
+    normalized.includes("y = x") ||
+    normalized.includes("y=x")
+  ) {
+    return buildNamedMathGraphAnswer("linear");
+  }
+
+  if (
+    (normalized.includes("cuadratica") && asksForGraph) ||
+    normalized.includes("parabola") ||
+    normalized.includes("x^2") ||
+    normalized.includes("x²")
+  ) {
+    return buildNamedMathGraphAnswer("quadratic");
+  }
+
+  if (
+    (normalized.includes("cubica") && asksForGraph) ||
+    normalized.includes("x^3") ||
+    normalized.includes("x³")
+  ) {
+    return buildNamedMathGraphAnswer("cubic");
+  }
+
+  if (
+    normalized.includes("valor absoluto") ||
+    normalized.includes("|x|") ||
+    (normalized.includes("absoluto") && asksForGraph)
+  ) {
+    return buildNamedMathGraphAnswer("absolute");
+  }
+
+  if (
+    normalized.includes("raiz cuadrada") ||
+    normalized.includes("sqrt") ||
+    normalized.includes("√x")
+  ) {
+    return buildNamedMathGraphAnswer("square-root");
+  }
+
+  if (
+    (normalized.includes("exponencial") && asksForGraph) ||
+    normalized.includes("e^x") ||
+    normalized.includes("exp(x)")
+  ) {
+    return buildNamedMathGraphAnswer("exponential");
+  }
+
+  if (
+    normalized.includes("logaritmica") ||
+    normalized.includes("logaritmo") ||
+    normalized.includes("ln(x)") ||
+    normalized.includes("log(x)")
+  ) {
+    return buildNamedMathGraphAnswer("logarithmic");
+  }
+
+  if (
+    (normalized.includes("racional") && asksForGraph) ||
+    normalized.includes("1/x") ||
+    normalized.includes("funcion inversa")
+  ) {
+    return buildNamedMathGraphAnswer("reciprocal");
+  }
+
   return null;
 }
 
@@ -437,6 +608,25 @@ function buildSineCosineGraphAnswer() {
         kind: "generated",
         src: "/api/math-graph?kind=sine-cosine",
         alt: "Gráfica comparativa de seno y coseno"
+      }
+    ]
+  };
+}
+
+function buildNamedMathGraphAnswer(kind) {
+  const meta = getNamedMathGraphMeta(kind);
+  if (!meta) {
+    return null;
+  }
+
+  return {
+    type: "image",
+    reply: meta.reply,
+    images: [
+      {
+        kind: "generated",
+        src: `/api/math-graph?kind=${kind}`,
+        alt: meta.alt
       }
     ]
   };
@@ -673,6 +863,431 @@ function buildSineCosineSvgMarkup() {
       <polyline fill="none" stroke="#2563eb" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${makePoints(Math.cos)}" />
     </svg>
   `.trim();
+}
+
+function getNamedMathGraphMeta(kind) {
+  const map = {
+    tangent: {
+      alt: "Gráfica exacta de la función tangente",
+      reply:
+        "Aquí tienes una gráfica exacta de y = tan(x), con asíntotas verticales y escalas en los dos ejes para que se vea con claridad su comportamiento periódico."
+    },
+    cotangent: {
+      alt: "Gráfica exacta de la función cotangente",
+      reply:
+        "Aquí tienes una gráfica exacta de y = cot(x), con asíntotas verticales y escalas en los dos ejes para analizar su periodicidad y sus ramas."
+    },
+    secant: {
+      alt: "Gráfica exacta de la función secante",
+      reply:
+        "Aquí tienes una gráfica exacta de y = sec(x), con discontinuidades visibles y escalas en ambos ejes para estudiar sus ramas y asíntotas."
+    },
+    cosecant: {
+      alt: "Gráfica exacta de la función cosecante",
+      reply:
+        "Aquí tienes una gráfica exacta de y = csc(x), con discontinuidades visibles y escalas en ambos ejes para estudiar sus ramas y asíntotas."
+    },
+    linear: {
+      alt: "Gráfica exacta de una función lineal",
+      reply:
+        "Aquí tienes una gráfica exacta de una función lineal de referencia, y = x, con escalas claras en ambos ejes."
+    },
+    quadratic: {
+      alt: "Gráfica exacta de una función cuadrática",
+      reply:
+        "Aquí tienes una gráfica exacta de una función cuadrática de referencia, y = x², con escalas claras en ambos ejes."
+    },
+    cubic: {
+      alt: "Gráfica exacta de una función cúbica",
+      reply:
+        "Aquí tienes una gráfica exacta de una función cúbica de referencia, y = x³, con escalas claras en ambos ejes."
+    },
+    absolute: {
+      alt: "Gráfica exacta de la función valor absoluto",
+      reply:
+        "Aquí tienes una gráfica exacta de la función valor absoluto, y = |x|, con escalas claras en ambos ejes."
+    },
+    "square-root": {
+      alt: "Gráfica exacta de la función raíz cuadrada",
+      reply:
+        "Aquí tienes una gráfica exacta de la función raíz cuadrada, y = √x, con escalas claras en ambos ejes."
+    },
+    exponential: {
+      alt: "Gráfica exacta de una función exponencial",
+      reply:
+        "Aquí tienes una gráfica exacta de una función exponencial de referencia, y = e^x, con escalas claras en ambos ejes."
+    },
+    logarithmic: {
+      alt: "Gráfica exacta de una función logarítmica",
+      reply:
+        "Aquí tienes una gráfica exacta de una función logarítmica de referencia, y = ln(x), con escalas claras en ambos ejes."
+    },
+    reciprocal: {
+      alt: "Gráfica exacta de una función racional",
+      reply:
+        "Aquí tienes una gráfica exacta de una función racional de referencia, y = 1/x, con escalas claras en ambos ejes y su discontinuidad visible."
+    }
+  };
+
+  return map[kind] || null;
+}
+
+function buildNamedMathGraphSvg(kind) {
+  const specs = {
+    tangent: {
+      title: "FUNCION TANGENTE",
+      formula: "y = tan(x)",
+      fn: Math.tan,
+      xMin: -1.45 * Math.PI,
+      xMax: 1.45 * Math.PI,
+      yMin: -4,
+      yMax: 4,
+      color: "#0f172a",
+      tickXs: [
+        { value: -Math.PI, label: "−π" },
+        { value: -0.5 * Math.PI, label: "−π/2" },
+        { value: 0, label: "0" },
+        { value: 0.5 * Math.PI, label: "π/2" },
+        { value: Math.PI, label: "π" }
+      ],
+      tickYs: [
+        { value: -3, label: "−3" },
+        { value: -1, label: "−1" },
+        { value: 0, label: "0" },
+        { value: 1, label: "1" },
+        { value: 3, label: "3" }
+      ]
+    },
+    cotangent: {
+      title: "FUNCION COTANGENTE",
+      formula: "y = cot(x)",
+      fn: (x) => {
+        const s = Math.sin(x);
+        if (Math.abs(s) < 0.02) {
+          return null;
+        }
+        return Math.cos(x) / s;
+      },
+      xMin: -1.45 * Math.PI,
+      xMax: 1.45 * Math.PI,
+      yMin: -4,
+      yMax: 4,
+      color: "#0f172a",
+      tickXs: [
+        { value: -Math.PI, label: "−π" },
+        { value: -0.5 * Math.PI, label: "−π/2" },
+        { value: 0, label: "0" },
+        { value: 0.5 * Math.PI, label: "π/2" },
+        { value: Math.PI, label: "π" }
+      ],
+      tickYs: [
+        { value: -3, label: "−3" },
+        { value: -1, label: "−1" },
+        { value: 0, label: "0" },
+        { value: 1, label: "1" },
+        { value: 3, label: "3" }
+      ]
+    },
+    secant: {
+      title: "FUNCION SECANTE",
+      formula: "y = sec(x)",
+      fn: (x) => {
+        const c = Math.cos(x);
+        if (Math.abs(c) < 0.02) {
+          return null;
+        }
+        return 1 / c;
+      },
+      xMin: -2 * Math.PI,
+      xMax: 2 * Math.PI,
+      yMin: -4,
+      yMax: 4,
+      color: "#0f172a",
+      tickXs: [
+        { value: -2 * Math.PI, label: "−2π" },
+        { value: -1.5 * Math.PI, label: "−3π/2" },
+        { value: -Math.PI, label: "−π" },
+        { value: -0.5 * Math.PI, label: "−π/2" },
+        { value: 0, label: "0" },
+        { value: 0.5 * Math.PI, label: "π/2" },
+        { value: Math.PI, label: "π" },
+        { value: 1.5 * Math.PI, label: "3π/2" },
+        { value: 2 * Math.PI, label: "2π" }
+      ],
+      tickYs: [
+        { value: -3, label: "−3" },
+        { value: -1, label: "−1" },
+        { value: 0, label: "0" },
+        { value: 1, label: "1" },
+        { value: 3, label: "3" }
+      ]
+    },
+    cosecant: {
+      title: "FUNCION COSECANTE",
+      formula: "y = csc(x)",
+      fn: (x) => {
+        const s = Math.sin(x);
+        if (Math.abs(s) < 0.02) {
+          return null;
+        }
+        return 1 / s;
+      },
+      xMin: -2 * Math.PI,
+      xMax: 2 * Math.PI,
+      yMin: -4,
+      yMax: 4,
+      color: "#0f172a",
+      tickXs: [
+        { value: -2 * Math.PI, label: "−2π" },
+        { value: -1.5 * Math.PI, label: "−3π/2" },
+        { value: -Math.PI, label: "−π" },
+        { value: -0.5 * Math.PI, label: "−π/2" },
+        { value: 0, label: "0" },
+        { value: 0.5 * Math.PI, label: "π/2" },
+        { value: Math.PI, label: "π" },
+        { value: 1.5 * Math.PI, label: "3π/2" },
+        { value: 2 * Math.PI, label: "2π" }
+      ],
+      tickYs: [
+        { value: -3, label: "−3" },
+        { value: -1, label: "−1" },
+        { value: 0, label: "0" },
+        { value: 1, label: "1" },
+        { value: 3, label: "3" }
+      ]
+    },
+    linear: {
+      title: "FUNCION LINEAL",
+      formula: "y = x",
+      fn: (x) => x,
+      xMin: -5,
+      xMax: 5,
+      yMin: -5,
+      yMax: 5,
+      color: "#0f172a",
+      tickXs: [-4, -2, 0, 2, 4],
+      tickYs: [-4, -2, 0, 2, 4]
+    },
+    quadratic: {
+      title: "FUNCION CUADRATICA",
+      formula: "y = x²",
+      fn: (x) => x * x,
+      xMin: -4,
+      xMax: 4,
+      yMin: -1,
+      yMax: 16,
+      color: "#0f172a",
+      tickXs: [-4, -2, 0, 2, 4],
+      tickYs: [0, 4, 8, 12, 16]
+    },
+    cubic: {
+      title: "FUNCION CUBICA",
+      formula: "y = x³",
+      fn: (x) => x * x * x,
+      xMin: -3,
+      xMax: 3,
+      yMin: -27,
+      yMax: 27,
+      color: "#0f172a",
+      tickXs: [-3, -2, -1, 0, 1, 2, 3],
+      tickYs: [-27, -9, 0, 9, 27]
+    },
+    absolute: {
+      title: "VALOR ABSOLUTO",
+      formula: "y = |x|",
+      fn: (x) => Math.abs(x),
+      xMin: -5,
+      xMax: 5,
+      yMin: -1,
+      yMax: 5,
+      color: "#0f172a",
+      tickXs: [-4, -2, 0, 2, 4],
+      tickYs: [0, 1, 2, 3, 4, 5]
+    },
+    "square-root": {
+      title: "RAIZ CUADRADA",
+      formula: "y = √x",
+      fn: (x) => (x < 0 ? null : Math.sqrt(x)),
+      xMin: -1,
+      xMax: 16,
+      yMin: -1,
+      yMax: 5,
+      color: "#0f172a",
+      tickXs: [0, 4, 8, 12, 16],
+      tickYs: [0, 1, 2, 3, 4]
+    },
+    exponential: {
+      title: "FUNCION EXPONENCIAL",
+      formula: "y = e^x",
+      fn: (x) => Math.exp(x),
+      xMin: -3,
+      xMax: 3,
+      yMin: -1,
+      yMax: 21,
+      color: "#0f172a",
+      tickXs: [-3, -2, -1, 0, 1, 2, 3],
+      tickYs: [0, 1, 3, 7, 15, 20]
+    },
+    logarithmic: {
+      title: "FUNCION LOGARITMICA",
+      formula: "y = ln(x)",
+      fn: (x) => (x <= 0 ? null : Math.log(x)),
+      xMin: 0.05,
+      xMax: 8,
+      yMin: -3,
+      yMax: 3,
+      color: "#0f172a",
+      tickXs: [0.5, 1, 2, 4, 6, 8],
+      tickYs: [-2, -1, 0, 1, 2]
+    },
+    reciprocal: {
+      title: "FUNCION RACIONAL",
+      formula: "y = 1/x",
+      fn: (x) => (Math.abs(x) < 0.08 ? null : 1 / x),
+      xMin: -6,
+      xMax: 6,
+      yMin: -6,
+      yMax: 6,
+      color: "#0f172a",
+      tickXs: [-6, -4, -2, 0, 2, 4, 6],
+      tickYs: [-6, -4, -2, 0, 2, 4, 6]
+    }
+  };
+
+  const spec = specs[kind];
+  if (!spec) {
+    return buildFunctionStudyCardSvgMarkup("Matemáticas", "Solicitud de gráfica no soportada todavía");
+  }
+
+  return buildFunctionPlotSvgMarkup(spec);
+}
+
+function buildFunctionPlotSvgMarkup({ title, formula, fn, xMin, xMax, yMin, yMax, color, tickXs, tickYs }) {
+  const width = 1200;
+  const height = 720;
+  const marginLeft = 90;
+  const marginRight = 70;
+  const marginTop = 90;
+  const marginBottom = 95;
+  const plotWidth = width - marginLeft - marginRight;
+  const plotHeight = height - marginTop - marginBottom;
+
+  const xToSvg = (x) => marginLeft + ((x - xMin) / (xMax - xMin)) * plotWidth;
+  const yToSvg = (y) => marginTop + ((yMax - y) / (yMax - yMin)) * plotHeight;
+  const xAxisY = yMin <= 0 && 0 <= yMax ? yToSvg(0) : yToSvg(yMin);
+  const yAxisX = xMin <= 0 && 0 <= xMax ? xToSvg(0) : xToSvg(xMin);
+
+  const normalizedTickXs = tickXs.map((tick) => (typeof tick === "number" ? { value: tick, label: String(tick) } : tick));
+  const normalizedTickYs = tickYs.map((tick) => (typeof tick === "number" ? { value: tick, label: String(tick) } : tick));
+
+  const verticalGuidesSvg = normalizedTickXs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const x = xToSvg(value);
+      return `<line x1="${x}" y1="${marginTop}" x2="${x}" y2="${height - marginBottom}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const horizontalGuidesSvg = normalizedTickYs
+    .filter(({ value }) => value !== 0)
+    .map(({ value }) => {
+      const y = yToSvg(value);
+      return `<line x1="${marginLeft}" y1="${y}" x2="${width - marginRight}" y2="${y}" stroke="#d8deea" stroke-width="1.5" stroke-dasharray="6 8" />`;
+    })
+    .join("");
+
+  const xTicksSvg = normalizedTickXs
+    .map(({ value, label }) => {
+      const x = xToSvg(value);
+      return `
+        <line x1="${x}" y1="${xAxisY - 10}" x2="${x}" y2="${xAxisY + 10}" stroke="#1b2230" stroke-width="2" />
+        <text x="${x}" y="${xAxisY + 48}" text-anchor="middle" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  const yTicksSvg = normalizedTickYs
+    .map(({ value, label }) => {
+      const y = yToSvg(value);
+      const textX = value === 0 ? yAxisX + 24 : yAxisX - 20;
+      const anchor = value === 0 ? "start" : "end";
+      return `
+        <line x1="${yAxisX - 10}" y1="${y}" x2="${yAxisX + 10}" y2="${y}" stroke="#1b2230" stroke-width="2" />
+        <text x="${textX}" y="${y + 10}" text-anchor="${anchor}" font-size="28" font-family="Georgia, serif" fill="#111827">${label}</text>
+      `;
+    })
+    .join("");
+
+  const segments = [];
+  let current = [];
+  const steps = 900;
+  for (let index = 0; index <= steps; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / steps;
+    const y = fn(x);
+    if (typeof y !== "number" || !Number.isFinite(y) || y < yMin - (yMax - yMin) || y > yMax + (yMax - yMin)) {
+      if (current.length > 1) {
+        segments.push(current.join(" "));
+      }
+      current = [];
+      continue;
+    }
+
+    current.push(`${xToSvg(x).toFixed(2)},${yToSvg(y).toFixed(2)}`);
+  }
+  if (current.length > 1) {
+    segments.push(current.join(" "));
+  }
+
+  const polylinesSvg = segments
+    .map((points) => `<polyline fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${points}" />`)
+    .join("");
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="#ffffff" />
+      <text x="${width / 2}" y="48" text-anchor="middle" font-size="42" font-weight="700" font-family="Arial, sans-serif" fill="#111111">${title}</text>
+      <text x="${width - 320}" y="165" text-anchor="start" font-size="34" font-style="italic" font-family="Georgia, serif" fill="#111111">${formula}</text>
+
+      ${verticalGuidesSvg}
+      ${horizontalGuidesSvg}
+
+      <line x1="${marginLeft - 10}" y1="${xAxisY}" x2="${width - marginRight + 18}" y2="${xAxisY}" stroke="#111827" stroke-width="3" />
+      <polygon points="${width - marginRight + 18},${xAxisY} ${width - marginRight - 6},${xAxisY - 10} ${width - marginRight - 6},${xAxisY + 10}" fill="#111827" />
+
+      <line x1="${yAxisX}" y1="${height - marginBottom + 10}" x2="${yAxisX}" y2="${marginTop - 18}" stroke="#111827" stroke-width="3" />
+      <polygon points="${yAxisX},${marginTop - 18} ${yAxisX - 10},${marginTop + 6} ${yAxisX + 10},${marginTop + 6}" fill="#111827" />
+
+      ${xTicksSvg}
+      ${yTicksSvg}
+      ${polylinesSvg}
+    </svg>
+  `.trim();
+}
+
+function buildFunctionStudyCardSvgMarkup(subjectLabel, prompt) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+      <rect width="100%" height="100%" fill="#f8fbff" />
+      <rect x="48" y="48" width="1104" height="624" rx="28" fill="#ffffff" stroke="#d7e4f4" stroke-width="3" />
+      <text x="90" y="120" font-size="30" font-family="Arial, sans-serif" letter-spacing="2.5" fill="#1d4f84">LÁMINA MATEMÁTICA SEGURA</text>
+      <text x="90" y="190" font-size="54" font-weight="700" font-family="Arial, sans-serif" fill="#132238">${escapeXml(subjectLabel.toUpperCase())}</text>
+      <text x="90" y="268" font-size="28" font-family="Arial, sans-serif" fill="#44556d">Solicitud</text>
+      <foreignObject x="90" y="286" width="980" height="120">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 34px; color: #132238; line-height: 1.25; word-break: break-word;">
+          ${escapeXml(prompt)}
+        </div>
+      </foreignObject>
+      <rect x="90" y="460" width="1010" height="140" rx="20" fill="#eef5fc" stroke="#cbdcf0" stroke-width="2" />
+      <text x="120" y="512" font-size="24" font-family="Arial, sans-serif" fill="#1d4f84">Uso recomendado</text>
+      <foreignObject x="120" y="532" width="940" height="56">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 24px; color: #223247; line-height: 1.35; word-break: break-word;">
+          Pide una familia o expresión concreta para obtener una gráfica exacta: lineal, cuadrática, cúbica, valor absoluto, raíz, exponencial, logarítmica, racional o trigonométrica.
+        </div>
+      </foreignObject>
+    </svg>
+  `.trim();
+
+  return svg;
 }
 
 function buildConversationMemory(history) {
