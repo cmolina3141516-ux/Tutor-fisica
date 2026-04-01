@@ -734,24 +734,25 @@ function shouldRequestImage(text) {
     return false;
   }
 
-  const cues = [
-    "imagen",
-    "imagenes",
-    "foto",
-    "ilustracion",
-    "muestrame",
-    "genera",
-    "crea",
-    "dibuja",
-    "diagrama",
-    "esquema",
-    "grafica",
-    "quiero ver",
-    "me gustaria ver",
-    "referentes"
-  ];
+  const mathGraphPattern =
+    /\b(grafica|grafico|dibuja|traza|curva|curvas|superpuest|misma ventana|mismo plano|compar|representa)\b.*\b(funcion|polinom|lineal|cuadratica|cubica|cuartica|quintica|grado|valor absoluto|raiz cuadrada|exponencial|logaritmica|racional|seno|coseno|tangente|cotangente|secante|cosecante|sin\(|cos\(|tan\()\b|\b(funcion|polinom|lineal|cuadratica|cubica|cuartica|quintica|grado|valor absoluto|raiz cuadrada|exponencial|logaritmica|racional|seno|coseno|tangente|cotangente|secante|cosecante|sin\(|cos\(|tan\()\b.*\b(grafica|grafico|dibuja|traza|curva|curvas|superpuest|misma ventana|mismo plano|compar|representa)\b/;
+  if (mathGraphPattern.test(normalized)) {
+    return true;
+  }
 
-  return cues.some((cue) => normalized.includes(cue));
+  if (
+    /\b(genera|crea|dame|muestrame|dibuja|traza|compara|superpone)\b/.test(normalized) &&
+    /\b(funcion|funciones|grafica|graficas|curva|curvas)\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  const visualVerbPattern =
+    /\b(muestrame|muestra|genera|crea|haz|hazme|quiero ver|me gustaria ver|dame|ensename|presenta|ilustra)\b/;
+  const visualNounPattern =
+    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|mapa|linea de tiempo|referentes visuales|referencias visuales)\b/;
+
+  return visualVerbPattern.test(normalized) && visualNounPattern.test(normalized);
 }
 
 function renderPendingAttachments() {

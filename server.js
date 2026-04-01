@@ -201,12 +201,22 @@ async function generateTutorReply(payload) {
         "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Educación Ambiental. Si quieres, puedo ayudarte con ecosistemas, célula, biodiversidad, ambiente, método científico, materia y proyectos escolares ambientales."
     };
   }
-  const wantsImage = Boolean(payload.generate_image) || shouldGenerateImage(effectiveUserMessage);
+  const mathGraphRequested =
+    subjectMode === "mathematics" && isMathGraphRequest(effectiveUserMessage);
+  const wantsImage =
+    Boolean(payload.generate_image) ||
+    shouldGenerateImage(effectiveUserMessage) ||
+    mathGraphRequested;
   const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(effectiveUserMessage) : null;
   if (mathDiagram && !isQuizMode) {
     return mathDiagram;
   }
-  if (subjectMode === "mathematics" && wantsImage && hasLatestImageAttachment && !isQuizMode) {
+  if (
+    subjectMode === "mathematics" &&
+    (wantsImage || mathGraphRequested) &&
+    hasLatestImageAttachment &&
+    !isQuizMode
+  ) {
     const inferredMathDiagram = await inferMathDiagramFromLatestImage({
       apiKey,
       latestUserTurn,
@@ -216,7 +226,7 @@ async function generateTutorReply(payload) {
       return inferredMathDiagram;
     }
   }
-  if (subjectMode === "mathematics" && wantsImage && !isQuizMode) {
+  if (subjectMode === "mathematics" && (wantsImage || mathGraphRequested) && !isQuizMode) {
     const universalMathDiagram = await tryGenerateUniversalMathGraphAnswer({
       apiKey,
       prompt: effectiveUserMessage || latestUserMessage
@@ -783,16 +793,28 @@ function parseMathFamilyJson(raw) {
 
 async function tryGenerateUniversalMathGraphAnswer({ apiKey, prompt }) {
   const normalized = normalizeText(prompt);
-  const asksForGraph =
-    normalized.includes("grafica") ||
-    normalized.includes("grafico") ||
-    normalized.includes("dibuja") ||
-    normalized.includes("traza") ||
-    normalized.includes("curva") ||
-    normalized.includes("funcion");
+  const asksForGraph = isMathGraphRequest(normalized);
 
   if (!asksForGraph) {
     return null;
+  }
+
+  const deterministicSpec = tryBuildDeterministicUniversalGraphSpec(normalized);
+  if (deterministicSpec) {
+    const svg = buildUniversalFunctionGraphSvgMarkup(deterministicSpec);
+    if (svg) {
+      return {
+        type: "image",
+        reply: "Aquí tienes la gráfica solicitada con ejes y escalas definidas.",
+        images: [
+          {
+            kind: "generated",
+            src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+            alt: "Gráfica matemática generada de forma exacta"
+          }
+        ]
+      };
+    }
   }
 
   const instruction =
@@ -853,6 +875,127 @@ async function tryGenerateUniversalMathGraphAnswer({ apiKey, prompt }) {
   } catch (error) {
     return null;
   }
+}
+
+function tryBuildDeterministicUniversalGraphSpec(normalized) {
+  const series = extractMathSeriesFromPrompt(normalized);
+  if (!series.length) {
+    return null;
+  }
+
+  let xMin = -6;
+  let xMax = 6;
+  if (series.some((item) => item.kind === "trig")) {
+    xMin = -2 * Math.PI;
+    xMax = 2 * Math.PI;
+  }
+  if (series.some((item) => item.kind === "logarithmic")) {
+    xMin = 0.05;
+    xMax = 8;
+  }
+  if (series.some((item) => item.kind === "square-root")) {
+    xMin = -1;
+    xMax = 16;
+  }
+
+  return {
+    title:
+      series.length > 1
+        ? "COMPARACIÓN DE FUNCIONES"
+        : `GRÁFICA DE ${series[0].label.toUpperCase()}`,
+    xMin,
+    xMax,
+    series: series.map((item) => ({
+      label: item.label,
+      expression: item.expression
+    }))
+  };
+}
+
+function extractMathSeriesFromPrompt(normalized) {
+  const series = [];
+  const add = (label, expression, kind = "generic") => {
+    if (!series.some((item) => item.expression === expression)) {
+      series.push({ label, expression, kind });
+    }
+  };
+
+  const polynomialDegree = parsePolynomialDegree(normalized);
+  if (polynomialDegree !== null) {
+    add(`y = x^${polynomialDegree}`, `x^${polynomialDegree}`, "polynomial");
+  }
+
+  if (
+    normalized.includes("lineal") ||
+    normalized.includes("recta") ||
+    normalized.includes("y = x") ||
+    normalized.includes("y=x")
+  ) {
+    add("y = x", "x");
+  }
+  if (
+    normalized.includes("cuadratica") ||
+    normalized.includes("parabola") ||
+    normalized.includes("x^2") ||
+    normalized.includes("x²")
+  ) {
+    add("y = x^2", "x^2");
+  }
+  if (
+    normalized.includes("cubica") ||
+    normalized.includes("x^3") ||
+    normalized.includes("x³")
+  ) {
+    add("y = x^3", "x^3");
+  }
+  if (normalized.includes("cuartica") || normalized.includes("cuartico") || normalized.includes("x^4")) {
+    add("y = x^4", "x^4", "polynomial");
+  }
+  if (normalized.includes("valor absoluto") || normalized.includes("|x|")) {
+    add("y = |x|", "abs(x)");
+  }
+  if (normalized.includes("raiz cuadrada") || normalized.includes("sqrt") || normalized.includes("√x")) {
+    add("y = sqrt(x)", "sqrt(x)", "square-root");
+  }
+  if (normalized.includes("exponencial") || normalized.includes("e^x") || normalized.includes("exp(x)")) {
+    add("y = e^x", "exp(x)");
+  }
+  if (normalized.includes("logaritmica") || normalized.includes("logaritmo") || normalized.includes("ln(x)") || normalized.includes("log(x)")) {
+    add("y = ln(x)", "log(x)", "logarithmic");
+  }
+  if (normalized.includes("racional") || normalized.includes("1/x") || normalized.includes("funcion inversa")) {
+    add("y = 1/x", "1/x");
+  }
+
+  if (normalized.includes("seno") || normalized.includes("sin(") || normalized.includes("sin x") || normalized.includes("sen(")) {
+    add("y = sen(x)", "sin(x)", "trig");
+  }
+  if (normalized.includes("coseno") || normalized.includes("cos(") || normalized.includes("cos x")) {
+    add("y = cos(x)", "cos(x)", "trig");
+  }
+  if (normalized.includes("tangente") || normalized.includes("tan(") || normalized.includes("tan x")) {
+    add("y = tan(x)", "tan(x)", "trig");
+  }
+  if (normalized.includes("cotangente") || normalized.includes("cot(") || normalized.includes("cot x")) {
+    add("y = cot(x)", "cos(x)/sin(x)", "trig");
+  }
+  if (normalized.includes("secante") || normalized.includes("sec(") || normalized.includes("sec x")) {
+    add("y = sec(x)", "1/cos(x)", "trig");
+  }
+  if (normalized.includes("cosecante") || normalized.includes("csc(") || normalized.includes("csc x")) {
+    add("y = csc(x)", "1/sin(x)", "trig");
+  }
+
+  const transformMatches = normalized.match(/y\s*=\s*([0-9x+\-*/^().,\s|a-z_]+)/gi) || [];
+  for (const match of transformMatches) {
+    const expression = String(match).split("=").slice(1).join("=").trim();
+    if (!expression) {
+      continue;
+    }
+    add(`y = ${expression}`, expression, "generic");
+  }
+
+  return series.slice(0, 3);
 }
 
 function parseUniversalGraphSpec(raw) {
@@ -1835,9 +1978,15 @@ function buildPolynomialGraphSvgMarkup(degree) {
 }
 
 function parsePolynomialDegree(normalized) {
-  const direct = normalized.match(/grado\s*(?:de\s*)?(\d{1,2})/);
+  const direct = normalized.match(/grado\s*(?:de\s*)?(\d{1,2})(?:\s*[º°o])?/);
   if (direct) {
     const degree = Number(direct[1]);
+    return Number.isInteger(degree) ? degree : null;
+  }
+
+  const inverseDirect = normalized.match(/(\d{1,2})(?:\s*[º°o])?\s*grado/);
+  if (inverseDirect) {
+    const degree = Number(inverseDirect[1]);
     return Number.isInteger(degree) ? degree : null;
   }
 
@@ -1853,6 +2002,8 @@ function parsePolynomialDegree(normalized) {
     cuarta: 4,
     quinto: 5,
     quinta: 5,
+    quintico: 5,
+    quintica: 5,
     sexto: 6,
     sexta: 6,
     septimo: 7,
@@ -2403,63 +2554,73 @@ function escapeXml(text) {
     .replace(/'/g, "&#39;");
 }
 
+function isMathGraphRequest(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const graphCuePattern =
+    /\b(grafica|grafico|grafico de|grafica de|dibuja|traza|curva|curvas|superpuest|misma ventana|mismo plano|mismo sistema|mismo grafico|compar|representa|plano cartesiano)\b/;
+  const mathFamilyPattern =
+    /\b(funcion|polinom|lineal|cuadratica|cubica|cuartica|quintica|sexto grado|septimo grado|octavo grado|noveno grado|decimo grado|grado|valor absoluto|raiz cuadrada|exponencial|logaritmica|racional|seno|coseno|tangente|cotangente|secante|cosecante|sin\(|cos\(|tan\(|x\^\d+|x²|x³|x⁴|x⁵)\b/;
+
+  if (graphCuePattern.test(normalized) && mathFamilyPattern.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /\b(ahora|tambien|también|luego|despues|después)\b/.test(normalized) &&
+    /\b(coseno|seno|tangente|cotangente|secante|cosecante|cubica|cuadratica|lineal|polinom|grado)\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  if (
+    /\b(genera|genera una|dame|quiero|muestrame|muestreme|muéstrame|dibuja)\b/.test(normalized) &&
+    /\b(funcion|grafica|curva|curvas)\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isExplicitVisualRequest(normalized) {
+  if (!normalized) {
+    return false;
+  }
+
+  const visualVerbPattern =
+    /\b(muestrame|muéstrame|muestra|genera|crea|haz|hazme|quiero ver|me gustaria ver|dame|ensename|enséñame|presenta|ilustra|dibuja|traza|grafica|representa)\b/;
+  const visualNounPattern =
+    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|grafica|graficas|curva|curvas|mapa|linea de tiempo|tabla|referencias visuales|referentes visuales)\b/;
+
+  if (visualVerbPattern.test(normalized) && visualNounPattern.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|mapa|linea de tiempo)\b/.test(normalized) &&
+    /\b(de|del|sobre|con|para)\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function shouldGenerateImage(text) {
   const normalized = normalizeText(text);
   if (!normalized) {
     return false;
   }
 
-  if (
-    normalized.includes("imagen") ||
-    normalized.includes("imagenes") ||
-    normalized.includes("foto") ||
-    normalized.includes("ilustracion")
-  ) {
+  if (isMathGraphRequest(normalized)) {
     return true;
   }
 
-  const cues = [
-    "muestrame una imagen",
-    "muestrame la imagen",
-    "muéstrame una imagen",
-    "muéstrame la imagen",
-    "muestrame",
-    "muéstrame",
-    "genera una imagen",
-    "genera la imagen",
-    "genera imagen",
-    "genera imagenes",
-    "genera un diagrama",
-    "genera un esquema",
-    "crea una imagen",
-    "crea la imagen",
-    "crea una ilustracion",
-    "crea un diagrama",
-    "haz una imagen",
-    "hazme una imagen",
-    "quiero una imagen",
-    "quiero ver una imagen",
-    "quiero ver imagenes",
-    "me gustaria ver",
-    "me gustaria una imagen",
-    "me gustaria ver imagenes",
-    "ver referencias",
-    "tener referentes",
-    "quiero ver",
-    "imagen de",
-    "imagenes de",
-    "imagen del",
-    "imagen para",
-    "dibuj",
-    "diagrama",
-    "esquema",
-    "ilustr",
-    "circuito",
-    "grafica el circuito",
-    "gráfica el circuito"
-  ];
-
-  return cues.some((cue) => normalized.includes(cue));
+  return isExplicitVisualRequest(normalized);
 }
 
 function extractBase64Payload(dataUrl) {
