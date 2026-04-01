@@ -680,8 +680,8 @@ async function readImageAsOptimizedDataUrl(file) {
   const originalDataUrl = await readFileAsDataUrl(file);
   const image = await loadImage(originalDataUrl);
 
-  const maxWidth = 1400;
-  const maxHeight = 1400;
+  const maxWidth = 1100;
+  const maxHeight = 1100;
   const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
   const width = Math.max(1, Math.round(image.width * scale));
   const height = Math.max(1, Math.round(image.height * scale));
@@ -695,7 +695,7 @@ async function readImageAsOptimizedDataUrl(file) {
   context.fillRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
 
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return canvas.toDataURL("image/jpeg", 0.72);
 }
 
 function loadImage(src) {
@@ -886,7 +886,7 @@ async function readImagesFromClipboardApi() {
 }
 
 function getTrimmedHistory(messages) {
-  const maxMessages = 8;
+  const maxMessages = 6;
   if (!Array.isArray(messages) || messages.length <= maxMessages) {
     return Array.isArray(messages) ? messages : [];
   }

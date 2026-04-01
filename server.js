@@ -468,7 +468,7 @@ function buildUserContent(message) {
       content.push({
         type: "input_image",
         image_url: attachment.dataUrl,
-        detail: "high"
+        detail: "auto"
       });
       continue;
     }
