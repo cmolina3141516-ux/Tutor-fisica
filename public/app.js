@@ -623,6 +623,10 @@ function renderRichBlock(block) {
     return renderList(lines, true);
   }
 
+  if (looksLikeStepBlock(lines)) {
+    return renderStepBlock(lines);
+  }
+
   const section = document.createElement("section");
   section.className = "rich-block";
 
@@ -657,6 +661,24 @@ function renderLine(line) {
     equation.className = "rich-equation";
     appendFormattedInline(equation, trimmed, true);
     return equation;
+  }
+
+  const labeledEquation = splitLabelAndEquation(trimmed);
+  if (labeledEquation) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "rich-labeled-equation";
+
+    const label = document.createElement("p");
+    label.className = "rich-paragraph rich-paragraph-label";
+    appendFormattedInline(label, labeledEquation.label);
+
+    const equation = document.createElement("div");
+    equation.className = "rich-equation";
+    appendFormattedInline(equation, labeledEquation.equation, true);
+
+    wrapper.appendChild(label);
+    wrapper.appendChild(equation);
+    return wrapper;
   }
 
   const paragraph = document.createElement("p");
@@ -697,6 +719,23 @@ function renderCodeBlock(content, className = "rich-code-block") {
   return pre;
 }
 
+function renderStepBlock(lines) {
+  const section = document.createElement("section");
+  section.className = "rich-step";
+
+  const [title, ...rest] = lines;
+  const heading = document.createElement("h4");
+  heading.className = "rich-step-title";
+  appendFormattedInline(heading, title.replace(/:$/, ""));
+  section.appendChild(heading);
+
+  rest.forEach((line) => {
+    section.appendChild(renderLine(line));
+  });
+
+  return section;
+}
+
 function appendFormattedInline(target, text, isEquation = false) {
   const parts = String(text).split(/(https?:\/\/[^\s]+)/g);
 
@@ -716,7 +755,7 @@ function appendFormattedInline(target, text, isEquation = false) {
     }
 
     const span = document.createElement("span");
-    span.innerHTML = formatInlineMathHtml(part, isEquation);
+    span.innerHTML = wrapMathSegments(formatInlineMathHtml(part, isEquation), isEquation);
     target.appendChild(span);
   }
 }
@@ -741,6 +780,17 @@ function formatInlineMathHtml(text, isEquation = false) {
   }
 
   return html;
+}
+
+function wrapMathSegments(html, isEquation = false) {
+  if (isEquation) {
+    return html;
+  }
+
+  return html.replace(
+    /((?:[A-Za-z]\([^)]*\)|[A-Za-z][A-Za-z0-9]*|[−\-+±]?\d+(?:[.,]\d+)?)(?:\s*(?:[+\-−±=]|\/|\*|·)\s*(?:[A-Za-z]\([^)]*\)|[A-Za-z][A-Za-z0-9]*|[−\-+±]?\d+(?:[.,]\d+)?))+(?:<sup>[^<]+<\/sup>)?(?:<sub>[^<]+<\/sub>)?)/g,
+    '<span class="math-inline">$1</span>'
+  );
 }
 
 function extractHeading(firstLine, hasFollowingLines) {
@@ -799,6 +849,31 @@ function isEquationLine(line) {
   }
 
   return !/[.!?]$/.test(trimmed) || /=/.test(trimmed);
+}
+
+function looksLikeStepBlock(lines) {
+  if (lines.length < 2) {
+    return false;
+  }
+
+  return /^\s*\d+[.)]\s+/.test(lines[0].trim());
+}
+
+function splitLabelAndEquation(line) {
+  const parts = String(line).split(/:\s+/);
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [label, equation] = parts;
+  if (!equation || !isEquationLine(equation)) {
+    return null;
+  }
+
+  return {
+    label: `${label.trim()}:`,
+    equation: equation.trim()
+  };
 }
 
 function renderAttachmentChips(attachments) {
