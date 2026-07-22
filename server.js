@@ -180,6 +180,7 @@ async function generateTutorReply(payload) {
   const hasLatestImageAttachment = hasImageAttachment(latestUserTurn);
   const hasLatestPdfAttachment = hasPdfAttachment(latestUserTurn);
   const subjectMode = getSubjectMode();
+  const hybridPhysicsMathTutor = isHybridPhysicsMathTutor();
   if (subjectMode === "mathematics" && shouldRejectAsNonMath(effectiveUserMessage)) {
     return {
       type: "text",
@@ -217,18 +218,19 @@ async function generateTutorReply(payload) {
       })
     };
   }
+  const mathGraphEnabled = subjectMode === "mathematics" || hybridPhysicsMathTutor;
   const mathGraphRequested =
-    subjectMode === "mathematics" && isMathGraphRequest(effectiveUserMessage);
+    mathGraphEnabled && isMathGraphRequest(effectiveUserMessage);
   const wantsImage =
     Boolean(payload.generate_image) ||
     shouldGenerateImage(effectiveUserMessage) ||
     mathGraphRequested;
-  const mathDiagram = subjectMode === "mathematics" ? tryGenerateMathDiagram(effectiveUserMessage) : null;
+  const mathDiagram = mathGraphEnabled ? tryGenerateMathDiagram(effectiveUserMessage) : null;
   if (mathDiagram && !isQuizMode) {
     return mathDiagram;
   }
   if (
-    subjectMode === "mathematics" &&
+    mathGraphEnabled &&
     (wantsImage || mathGraphRequested) &&
     hasLatestImageAttachment &&
     !isQuizMode
@@ -242,7 +244,7 @@ async function generateTutorReply(payload) {
       return inferredMathDiagram;
     }
   }
-  if (subjectMode === "mathematics" && (wantsImage || mathGraphRequested) && !isQuizMode) {
+  if (mathGraphEnabled && (wantsImage || mathGraphRequested) && !isQuizMode) {
     const universalMathDiagram = await tryGenerateUniversalMathGraphAnswer({
       apiKey,
       prompt: effectiveUserMessage || latestUserMessage
@@ -3043,31 +3045,39 @@ function buildTutorConfig() {
     };
   }
 
+  const hybridPhysicsMathTutor = isHybridPhysicsMathTutor();
+
   return {
     schoolName,
     tutorName,
-    subjectName: "Física",
-    pageTitle: "Tutor de Física Embebible",
-    heroEyebrow: "Tutor IA de Fisica",
+    subjectName: hybridPhysicsMathTutor ? "Física y Matemáticas" : "Física",
+    pageTitle: hybridPhysicsMathTutor ? "Tutor de Física y Matemáticas Embebible" : "Tutor de Física Embebible",
+    heroEyebrow: hybridPhysicsMathTutor ? "Tutor IA de Física y Matemáticas" : "Tutor IA de Fisica",
     heroLead:
-      "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.",
+      hybridPhysicsMathTutor
+        ? "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances con solidez en física y matemáticas."
+        : "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.",
     heroQuoteText:
       '"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"',
-    heroQuoteAuthor: "CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.",
+    heroQuoteAuthor: hybridPhysicsMathTutor ? "CARLOS MOLINA FÍSICA Y MATEMÁTICAS C.E.O V.P." : "CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.",
     avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png",
-    avatarAlt: "Avatar del profesor de física",
+    avatarAlt: hybridPhysicsMathTutor ? "Avatar del profesor de física y matemáticas" : "Avatar del profesor de física",
     chatEyebrow: "Aula interactiva",
     timerKicker: "Tiempo de trabajo",
     timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
     topicLabel: "Tema",
     goalLabel: "Objetivo",
-    defaultTopic: "Leyes de Newton",
-    defaultLearningGoal: "Comprender el tema y resolver ejercicios",
-    messagePlaceholder: "Escribe tu duda de física aquí...",
+    defaultTopic: hybridPhysicsMathTutor ? "Leyes de Newton o funciones" : "Leyes de Newton",
+    defaultLearningGoal: hybridPhysicsMathTutor ? "Comprender el tema y resolver ejercicios de física o matemáticas" : "Comprender el tema y resolver ejercicios",
+    messagePlaceholder: hybridPhysicsMathTutor ? "Escribe tu duda de física o matemáticas aquí..." : "Escribe tu duda de física aquí...",
     helperText:
-      "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
+      hybridPhysicsMathTutor
+        ? "Consejo: prueba pedir una explicación, un quiz, una gráfica o resolver un ejercicio paso a paso de física o matemáticas."
+        : "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
     welcomeMessage:
-      "Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Física.",
+      hybridPhysicsMathTutor
+        ? "Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios, resolución de problemas y aclaración de dudas sobre Física y Matemáticas."
+        : "Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Física.",
     suggestedPrompts: [
       "Explicame la segunda ley de Newton con un ejemplo de 10°",
       "Ayudame con un ejercicio de MRUA paso a paso",
@@ -3078,7 +3088,10 @@ function buildTutorConfig() {
       "Explícame las ondas: amplitud, frecuencia y longitud de onda",
       "Recomiendame una simulacion para estudiar sonido y ondas",
       "Explicame corriente, voltaje y resistencia con un circuito simple",
-      "Hazme preguntas rapidas sobre ley de Ohm y potencia electrica"
+      "Hazme preguntas rapidas sobre ley de Ohm y potencia electrica",
+      "Dibuja la función seno con detalles en los ejes",
+      "Ayudame a resolver una factorización paso a paso",
+      "Compara una función cúbica y una de quinto grado en la misma gráfica"
     ]
   };
 }
@@ -3095,6 +3108,15 @@ function getSubjectMode() {
     return "natural_sciences";
   }
   return "physics";
+}
+
+function isHybridPhysicsMathTutor() {
+  if (getSubjectMode() !== "physics") {
+    return false;
+  }
+
+  const tutorName = normalizeText(process.env.TUTOR_NAME || "Profesor Julian");
+  return tutorName.includes("julian");
 }
 
 function buildFallbackSystemPrompt() {
@@ -3216,13 +3238,14 @@ Formato recomendado:
 - Siguiente paso sugerido`;
   }
 
-  return `Eres Profesor Julian, un tutor virtual de fisica para bachillerato en Colombia.
+  return `Eres Profesor Julian, un tutor virtual de fisica y matemáticas para bachillerato en Colombia.
 
 Tu estilo:
 - Explica con claridad, cercania y precision.
 - Usa espanol claro y natural.
 - Adapta el nivel a 10° y 11°.
 - Prioriza comprension conceptual antes que tecnicismos innecesarios.
+- Atiende fisica y matemáticas con igual rigor, entusiasmo, profesionalismo y exigencia pedagógica.
 
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
@@ -3230,8 +3253,11 @@ Reglas pedagogicas:
 - Si detectas confusion, aclara primero el punto central.
 - Usa ejemplos cotidianos cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
-- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico asociado.
+- Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico o matemático asociado.
+- Si el estudiante pide una grafica, función, comparación de funciones, factorización, algebra, trigonometría o análisis matemático, atiéndelo con la misma calidad con que atiendes física.
+- Puedes resolver problemas de álgebra, funciones, trigonometría, geometría analítica y cálculo introductorio cuando el nivel sea de bachillerato.
 - Si no sabes algo con certeza, dilo con honestidad y ofrece una mejor aproximacion.
+- Si la consulta es de otra asignatura ajena a física o matemáticas, indícalo con amabilidad y reconduce al área más cercana de física o matemáticas.
 
 Temas frecuentes:
 - MRU y MRUA
@@ -3242,9 +3268,15 @@ Temas frecuentes:
 - Movimiento circular
 - Ondas y sonido
 - Electricidad, ley de Ohm, circuitos y potencia electrica
+- Álgebra y factorización
+- Funciones y gráficas
+- Trigonometría
+- Geometría analítica
+- Cálculo introductorio
 
 Formato recomendado:
 - Explicacion
+- Procedimiento
 - Ejemplo o aplicacion
 - Siguiente paso sugerido`;
 }
