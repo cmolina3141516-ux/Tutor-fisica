@@ -3058,7 +3058,9 @@ function buildTutorConfig() {
         ? "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances con solidez en física y matemáticas."
         : "Explicaciones claras, ejercicios guiados, resolución de problemas, aclaración de dudas y exploración de recursos para que avances en esta hermosa ciencia.",
     heroQuoteText:
-      '"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"',
+      hybridPhysicsMathTutor
+        ? '"La física y las matemáticas me han permitido comprender con mayor profundidad el mundo. Es fascinante descubrir cómo se conectan las ideas, los números y los fenómenos para explicar la realidad."'
+        : '"La física me permitió comprender muchas más cosas que las que ahora no comprendo. Es fascinante poder entender por qué y cómo funcionan las cosas, emprender el viaje para cada día conocer más"',
     heroQuoteAuthor: hybridPhysicsMathTutor ? "CARLOS MOLINA FÍSICA Y MATEMÁTICAS C.E.O V.P." : "CARLOS MOLINA PROFESOR DE FÍSICA C.E.O V.P.",
     avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/7ZPGVNqH/PROFE-ESTEBAN-FISICA.png",
     avatarAlt: hybridPhysicsMathTutor ? "Avatar del profesor de física y matemáticas" : "Avatar del profesor de física",
