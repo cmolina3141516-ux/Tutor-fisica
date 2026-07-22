@@ -180,7 +180,7 @@ async function generateTutorReply(payload) {
   const hasLatestImageAttachment = hasImageAttachment(latestUserTurn);
   const hasLatestPdfAttachment = hasPdfAttachment(latestUserTurn);
   const subjectMode = getSubjectMode();
-  const hybridPhysicsMathTutor = isHybridPhysicsMathTutor();
+  const hybridPhysicsMathTutor = subjectMode === "physics";
   if (subjectMode === "mathematics" && shouldRejectAsNonMath(effectiveUserMessage)) {
     return {
       type: "text",
@@ -3110,15 +3110,6 @@ function getSubjectMode() {
     return "natural_sciences";
   }
   return "physics";
-}
-
-function isHybridPhysicsMathTutor() {
-  if (getSubjectMode() !== "physics") {
-    return false;
-  }
-
-  const tutorName = normalizeText(process.env.TUTOR_NAME || "Profesor Julian");
-  return tutorName.includes("julian");
 }
 
 function buildFallbackSystemPrompt() {

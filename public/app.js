@@ -1,7 +1,7 @@
 const state = {
   tutorName: "Profesor Julián",
   schoolName: "Virtual Planet",
-  subjectName: "Física",
+  subjectName: "Física y Matemáticas",
   messages: [],
   activeQuiz: null,
   pendingAttachments: [],
