@@ -201,6 +201,22 @@ async function generateTutorReply(payload) {
         "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Educación Ambiental. Si quieres, puedo ayudarte con ecosistemas, célula, biodiversidad, ambiente, método científico, materia y proyectos escolares ambientales."
     };
   }
+  if (
+    !isQuizMode &&
+    !hasLatestAttachments &&
+    shouldAskForClarification({
+      message: effectiveUserMessage,
+      subjectMode
+    })
+  ) {
+    return {
+      type: "text",
+      reply: buildClarificationReply({
+        message: effectiveUserMessage,
+        subjectMode
+      })
+    };
+  }
   const mathGraphRequested =
     subjectMode === "mathematics" && isMathGraphRequest(effectiveUserMessage);
   const wantsImage =
@@ -2583,6 +2599,128 @@ function shouldRejectAsNonNaturalSciences(text) {
   ];
 
   return nonNaturalCues.some((cue) => normalized.includes(cue));
+}
+
+function shouldAskForClarification({ message, subjectMode }) {
+  const normalized = normalizeText(message);
+  if (!normalized) {
+    return false;
+  }
+
+  const broadLeadPatterns = [
+    /^hablame de\b/,
+    /^explicame\b/,
+    /^explicame sobre\b/,
+    /^cuentame sobre\b/,
+    /^dime sobre\b/,
+    /^quiero saber sobre\b/,
+    /^que sabes de\b/,
+    /^que me puedes decir de\b/
+  ];
+
+  const asksBroadly = broadLeadPatterns.some((pattern) => pattern.test(normalized));
+  if (!asksBroadly) {
+    return false;
+  }
+
+  if (shouldGenerateImage(normalized) || isMathGraphRequest(normalized)) {
+    return false;
+  }
+
+  const specificityCues = [
+    "con un ejemplo",
+    "con ejemplos",
+    "paso a paso",
+    "ejercicio",
+    "ejercicios",
+    "problema",
+    "problemas",
+    "aplicacion",
+    "aplicaciones",
+    "formula",
+    "formulas",
+    "causas",
+    "consecuencias",
+    "historia",
+    "linea de tiempo",
+    "comparacion",
+    "comparar",
+    "tipos de",
+    "caracteristicas",
+    "ventajas",
+    "desventajas",
+    "definicion",
+    "diferencia entre",
+    "origen",
+    "partes de",
+    "leyes de",
+    "grafic",
+    "imagen",
+    "quiz"
+  ];
+
+  if (specificityCues.some((cue) => normalized.includes(cue))) {
+    return false;
+  }
+
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 18) {
+    return false;
+  }
+
+  if (subjectMode === "mathematics") {
+    return /funcion|algebra|geometr|trigonom|derivada|integral|probabilidad|estadistica|ecuacion|fraccion|porcentaje|raiz|logarit|polinom|limite/.test(
+      normalized
+    );
+  }
+
+  if (subjectMode === "social_studies") {
+    return /historia|geografia|democracia|constitucion|ciudadania|economia|sociedad|territorio|independencia|gobierno|estado|globalizacion|conflicto|politica/.test(
+      normalized
+    );
+  }
+
+  if (subjectMode === "natural_sciences") {
+    return /ecosistema|celula|biodiversidad|ambiente|metodo cientifico|materia|energia|fotosintesis|respiracion|reino animal|reino vegetal|ciclo del carbono|ciclo del agua|genetica|quimica/.test(
+      normalized
+    );
+  }
+
+  return /energia|fuerza|fluido|termodinamica|aceleracion|movimiento|ondas|electricidad|magnetismo|gravitacion|presion/.test(
+    normalized
+  );
+}
+
+function buildClarificationReply({ message, subjectMode }) {
+  const topic = extractClarificationTopic(message);
+  const subjectName =
+    subjectMode === "mathematics"
+      ? "matemáticas"
+      : subjectMode === "social_studies"
+        ? "ciencias sociales"
+        : subjectMode === "natural_sciences"
+          ? "ciencias naturales y educación ambiental"
+          : "física";
+
+  const safeTopic = topic || `ese tema de ${subjectName}`;
+  return `Claro. ¿Qué quieres que te explique acerca de ${safeTopic}? Dame un poco más de claridad sobre el aspecto que deseas profundizar o comprender, por ejemplo definición, aplicaciones, ejemplos, causas, características o un ejercicio paso a paso.`;
+}
+
+function extractClarificationTopic(message) {
+  const raw = String(message || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const match = raw.match(
+    /^(?:háblame de|hablame de|explícame sobre|explicame sobre|explícame|explicame|cuéntame sobre|cuentame sobre|dime sobre|quiero saber sobre|qué sabes de|que sabes de|qué me puedes decir de|que me puedes decir de)\s+(.+)$/i
+  );
+
+  if (!match) {
+    return raw;
+  }
+
+  return match[1].replace(/[?.!]+$/g, "").trim();
 }
 
 function normalizeText(text) {
