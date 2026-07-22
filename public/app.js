@@ -556,34 +556,249 @@ function finishQuiz(quizState, footer, progress, finishButton) {
 }
 
 function renderRichText(text) {
-  const fragment = document.createDocumentFragment();
-  const lines = String(text).split("\n");
+  const root = document.createElement("div");
+  root.className = "rich-text";
 
-  lines.forEach((line, index) => {
-    if (index > 0) {
-      fragment.appendChild(document.createElement("br"));
+  const segments = splitRichTextSegments(String(text || ""));
+  segments.forEach((segment) => {
+    if (segment.type === "code") {
+      root.appendChild(renderCodeBlock(segment.content));
+      return;
     }
 
-    const parts = line.split(/(https?:\/\/[^\s]+)/g);
-    for (const part of parts) {
-      if (!part) {
-        continue;
-      }
+    const blocks = segment.content
+      .split(/\n\s*\n+/)
+      .map((block) => block.replace(/\n+$/g, "").trim())
+      .filter(Boolean);
 
-      if (/^https?:\/\/[^\s]+$/i.test(part)) {
-        const link = document.createElement("a");
-        link.href = part;
-        link.textContent = part;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        fragment.appendChild(link);
-      } else {
-        fragment.appendChild(document.createTextNode(part));
-      }
-    }
+    blocks.forEach((block) => {
+      root.appendChild(renderRichBlock(block));
+    });
   });
 
-  return fragment;
+  return root;
+}
+
+function splitRichTextSegments(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n");
+  const segments = [];
+  const pattern = /```([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(normalized))) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: normalized.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: "code", content: match[1].trimEnd() });
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < normalized.length) {
+    segments.push({ type: "text", content: normalized.slice(lastIndex) });
+  }
+
+  return segments.filter((segment) => segment.content.trim());
+}
+
+function renderRichBlock(block) {
+  const lines = block
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""))
+    .filter((line) => line.trim().length);
+
+  if (!lines.length) {
+    return document.createElement("div");
+  }
+
+  if (looksLikeAsciiMathBlock(lines)) {
+    return renderCodeBlock(lines.join("\n"), "math-work");
+  }
+
+  if (lines.every((line) => /^\s*[-*•]\s+/.test(line))) {
+    return renderList(lines, false);
+  }
+
+  if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
+    return renderList(lines, true);
+  }
+
+  const section = document.createElement("section");
+  section.className = "rich-block";
+
+  const [firstLine, ...restLines] = lines;
+  const headingText = extractHeading(firstLine, restLines.length > 0);
+  if (headingText) {
+    section.appendChild(renderHeading(headingText));
+    restLines.forEach((line) => {
+      section.appendChild(renderLine(line));
+    });
+    return section;
+  }
+
+  lines.forEach((line) => {
+    section.appendChild(renderLine(line));
+  });
+  return section;
+}
+
+function renderLine(line) {
+  const trimmed = line.trim();
+
+  if (/^\s*[-*•]\s+/.test(trimmed)) {
+    const item = document.createElement("p");
+    item.className = "rich-list-item";
+    appendFormattedInline(item, trimmed.replace(/^\s*[-*•]\s+/, ""));
+    return item;
+  }
+
+  if (isEquationLine(trimmed)) {
+    const equation = document.createElement("div");
+    equation.className = "rich-equation";
+    appendFormattedInline(equation, trimmed, true);
+    return equation;
+  }
+
+  const paragraph = document.createElement("p");
+  paragraph.className = "rich-paragraph";
+  appendFormattedInline(paragraph, trimmed);
+  return paragraph;
+}
+
+function renderHeading(text) {
+  const heading = document.createElement("h4");
+  heading.className = "rich-heading";
+  appendFormattedInline(heading, text.replace(/:$/, ""));
+  return heading;
+}
+
+function renderList(lines, ordered = false) {
+  const list = document.createElement(ordered ? "ol" : "ul");
+  list.className = ordered ? "rich-list rich-list-ordered" : "rich-list";
+
+  lines.forEach((line) => {
+    const item = document.createElement("li");
+    const cleanLine = ordered
+      ? line.replace(/^\s*\d+[.)]\s+/, "")
+      : line.replace(/^\s*[-*•]\s+/, "");
+    appendFormattedInline(item, cleanLine.trim());
+    list.appendChild(item);
+  });
+
+  return list;
+}
+
+function renderCodeBlock(content, className = "rich-code-block") {
+  const pre = document.createElement("pre");
+  pre.className = className;
+  const code = document.createElement("code");
+  code.textContent = content;
+  pre.appendChild(code);
+  return pre;
+}
+
+function appendFormattedInline(target, text, isEquation = false) {
+  const parts = String(text).split(/(https?:\/\/[^\s]+)/g);
+
+  for (const part of parts) {
+    if (!part) {
+      continue;
+    }
+
+    if (/^https?:\/\/[^\s]+$/i.test(part)) {
+      const link = document.createElement("a");
+      link.href = part;
+      link.textContent = part;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      target.appendChild(link);
+      continue;
+    }
+
+    const span = document.createElement("span");
+    span.innerHTML = formatInlineMathHtml(part, isEquation);
+    target.appendChild(span);
+  }
+}
+
+function formatInlineMathHtml(text, isEquation = false) {
+  let html = escapeHtml(text);
+
+  html = html.replace(
+    /([A-Za-zÁÉÍÓÚáéíóúÑñ0-9)\]])\^(\{[^}]+\}|-?\d+|[A-Za-zÁÉÍÓÚáéíóúÑñ]+)/g,
+    (_, base, exponent) => `${base}<sup>${escapeHtml(exponent.replace(/[{}]/g, ""))}</sup>`
+  );
+  html = html.replace(
+    /([A-Za-zÁÉÍÓÚáéíóúÑñ])_([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ]+)/g,
+    (_, base, subscript) => `${base}<sub>${escapeHtml(subscript)}</sub>`
+  );
+  html = html.replace(/\bpi\b/gi, "π");
+  html = html.replace(/\bsqrt\s*\(([^)]+)\)/gi, "√($1)");
+  html = html.replace(/<=/g, "≤").replace(/>=/g, "≥").replace(/!=/g, "≠");
+
+  if (isEquation) {
+    html = html.replace(/\b(sen|sin|cos|tan|cot|sec|csc|ln|log)\b/gi, "<em>$1</em>");
+  }
+
+  return html;
+}
+
+function extractHeading(firstLine, hasFollowingLines) {
+  const trimmed = firstLine.trim();
+  const labelPattern =
+    /^(Datos|Paso\s+\d+|Paso\s+final|Procedimiento|Desarrollo|Solucion|Solución|Comprobacion|Comprobación|Verificacion|Verificación|Respuesta(?:\s+final)?|Conclusiones?|Explicacion|Explicación|Ejemplo|Aplicacion|Aplicación|Analisis|Análisis|Siguiente paso sugerido|Nivel y objetivo|Objetivo|Observacion|Observación)$/i;
+
+  if (labelPattern.test(trimmed.replace(/:$/, ""))) {
+    return trimmed;
+  }
+
+  if (hasFollowingLines && /^\d+\.\s+/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+function looksLikeAsciiMathBlock(lines) {
+  if (lines.length < 2) {
+    return false;
+  }
+
+  const joined = lines.join("\n");
+  return (
+    /-{3,}/.test(joined) ||
+    /\|/.test(joined) ||
+    /\s{2,}/.test(joined) ||
+    lines.every((line) => /^[\d\s|.+\-=/()x^]*$/.test(line.trim()))
+  );
+}
+
+function isEquationLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed || trimmed.length > 120) {
+    return false;
+  }
+
+  if (/^\d+\.\s+/.test(trimmed) || /^[-*•]\s+/.test(trimmed)) {
+    return false;
+  }
+
+  if (/^[A-ZÁÉÍÓÚÑ][^.!?]{1,40}:$/.test(trimmed)) {
+    return false;
+  }
+
+  const hasMathSignal =
+    /[=≈≠≤≥√π]/.test(trimmed) ||
+    /\b(sen|sin|cos|tan|cot|sec|csc|ln|log)\b/i.test(trimmed) ||
+    /[A-Za-z]\([^)]+\)/.test(trimmed) ||
+    /\^/.test(trimmed) ||
+    /[0-9]\s*[+\-*/]\s*[0-9A-Za-z(]/.test(trimmed);
+
+  if (!hasMathSignal) {
+    return false;
+  }
+
+  return !/[.!?]$/.test(trimmed) || /=/.test(trimmed);
 }
 
 function renderAttachmentChips(attachments) {
