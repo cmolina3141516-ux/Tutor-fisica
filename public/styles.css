@@ -691,6 +691,12 @@ textarea:focus {
   min-width: 0;
 }
 
+.composer-submit-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .composer-actions {
   margin-top: 12px;
   display: flex;
@@ -910,6 +916,10 @@ button[type="submit"] {
   flex: 0 0 auto;
 }
 
+.composer-submit-row button[type="submit"] {
+  min-width: 140px;
+}
+
 button[type="submit"]:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -951,6 +961,10 @@ button[type="submit"]:disabled {
     flex-direction: column;
   }
 
+  .composer-submit-row {
+    justify-content: stretch;
+  }
+
   .composer-buttons {
     width: 100%;
     justify-content: flex-start;
@@ -988,6 +1002,10 @@ button[type="submit"]:disabled {
 
   .composer-buttons {
     flex-direction: column;
+    width: 100%;
+  }
+
+  .composer-submit-row {
     width: 100%;
   }
 

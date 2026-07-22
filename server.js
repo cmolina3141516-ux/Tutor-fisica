@@ -235,6 +235,16 @@ async function generateTutorReply(payload) {
       return universalMathDiagram;
     }
   }
+  if (subjectMode !== "mathematics" && wantsImage && !isQuizMode && !hasLatestAttachments) {
+    const subjectVisual = await generateSubjectVisualImage({
+      apiKey,
+      subjectMode,
+      prompt: effectiveUserMessage || "Genera una imagen educativa."
+    });
+    if (subjectVisual) {
+      return subjectVisual;
+    }
+  }
   if (wantsImage && !isQuizMode && !hasLatestAttachments) {
     return buildVerifiedImageOnlyReply({
       subjectMode,
@@ -244,7 +254,7 @@ async function generateTutorReply(payload) {
 
   const systemText = isQuizMode
     ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.${buildAttachmentPriorityInstructions({
+    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.${buildAttachmentPriorityInstructions({
         hasLatestAttachments,
         hasLatestImageAttachment,
         hasLatestPdfAttachment
@@ -371,63 +381,100 @@ function extractGeneratedImages(data) {
   return images;
 }
 
-function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
-  const subjectLabel =
-    subjectMode === "mathematics"
-      ? "Matemáticas"
-      : subjectMode === "social_studies"
-        ? "Ciencias Sociales"
-        : subjectMode === "natural_sciences"
-          ? "Ciencias Naturales y Educación Ambiental"
-          : "Física";
+async function generateSubjectVisualImage({ apiKey, subjectMode, prompt }) {
+  const subjectLabel = getSubjectLabel(subjectMode);
+  const visualPrompt = buildSubjectImagePrompt({ subjectMode, prompt });
 
-  return {
-    type: "image",
-    reply:
-      subjectMode === "mathematics"
-        ? "Aquí tienes una lámina matemática segura. Para funciones reales típicas, la app genera gráficas exactas; para solicitudes no soportadas todavía, entrega una síntesis visual fiel sin inventar resultados."
-        : `Aquí tienes una lámina educativa segura sobre tu solicitud de ${subjectLabel}. Resume el tema pedido de forma visual y fiel, sin inventar hechos ni escenas falsas.`,
-    images: [
-      {
-        kind: "generated",
-        src: buildSafeVisualCardDataUrl({ subjectLabel, prompt }),
-        alt: `Lámina visual segura sobre ${subjectLabel}`
-      }
-    ]
-  };
+  try {
+    const response = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+        prompt: visualPrompt,
+        size: "1024x1024"
+      })
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const image = Array.isArray(data.data) ? data.data[0] : null;
+    const src =
+      typeof image?.b64_json === "string" && image.b64_json
+        ? `data:image/png;base64,${image.b64_json}`
+        : typeof image?.url === "string" && image.url
+          ? image.url
+          : "";
+
+    if (!src) {
+      return null;
+    }
+
+    return {
+      type: "image",
+      reply: `Aquí tienes una imagen educativa clara sobre ${subjectLabel}.`,
+      images: [
+        {
+          kind: "generated",
+          src,
+          alt: `Imagen educativa de ${subjectLabel}`
+        }
+      ]
+    };
+  } catch (error) {
+    return null;
+  }
 }
 
-function buildSafeVisualCardDataUrl({ subjectLabel, prompt }) {
-  const title = escapeXml(subjectLabel.toUpperCase());
-  const topic = escapeXml(String(prompt || "Solicitud visual").slice(0, 220));
-  const recommendation =
-    subjectLabel === "Matemáticas"
-      ? "Pide la función concreta para obtener una gráfica exacta: lineal, cuadrática, cúbica, polinómica de grado n, valor absoluto, raíz, exponencial, logarítmica, racional, seno, coseno, tangente, cotangente, secante o cosecante."
-      : "Para análisis factual riguroso, sube una imagen o captura real y el tutor la interpretará sin inventar contenido.";
+function getSubjectLabel(subjectMode) {
+  return subjectMode === "mathematics"
+    ? "Matemáticas"
+    : subjectMode === "social_studies"
+      ? "Ciencias Sociales"
+      : subjectMode === "natural_sciences"
+        ? "Ciencias Naturales y Educación Ambiental"
+        : "Física";
+}
 
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
-      <rect width="100%" height="100%" fill="#f8fbff" />
-      <rect x="48" y="48" width="1104" height="624" rx="28" fill="#ffffff" stroke="#d7e4f4" stroke-width="3" />
-      <text x="90" y="120" font-size="28" font-family="Arial, sans-serif" letter-spacing="3" fill="#1d4f84">LÁMINA VISUAL SEGURA</text>
-      <text x="90" y="190" font-size="54" font-weight="700" font-family="Arial, sans-serif" fill="#132238">${title}</text>
-      <text x="90" y="280" font-size="24" font-family="Arial, sans-serif" fill="#44556d">Solicitud del estudiante</text>
-      <foreignObject x="90" y="300" width="1010" height="130">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 34px; color: #132238; line-height: 1.3; word-break: break-word;">
-          ${topic}
-        </div>
-      </foreignObject>
-      <rect x="90" y="470" width="1010" height="140" rx="20" fill="#eef5fc" stroke="#cbdcf0" stroke-width="2" />
-      <text x="120" y="520" font-size="24" font-family="Arial, sans-serif" fill="#1d4f84">Uso pedagógico</text>
-      <foreignObject x="120" y="540" width="950" height="56">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 24px; color: #223247; line-height: 1.35; word-break: break-word;">
-          ${escapeXml(recommendation)}
-        </div>
-      </foreignObject>
-    </svg>
-  `.trim();
+function buildSubjectImagePrompt({ subjectMode, prompt }) {
+  const cleanedPrompt = String(prompt || "Genera una imagen educativa.").trim();
+  const subjectLabel = getSubjectLabel(subjectMode);
+  const style =
+    subjectMode === "social_studies"
+      ? "Infografía escolar o diagrama histórico-social claro, neutral, riguroso, sin propaganda, sin hechos inventados, con composición tipo libro de texto."
+      : subjectMode === "natural_sciences"
+        ? "Infografía o diagrama científico escolar, claro, ordenado, factual, estilo libro de ciencias, con flechas, etiquetas y procesos bien definidos."
+        : subjectMode === "physics"
+          ? "Diagrama o ilustración educativa de física, limpio, técnico, con ejes, flechas, símbolos y etiquetas claras, estilo libro escolar."
+          : "Infografía o esquema matemático limpio, exacto, con ejes, escalas, rótulos y composición de libro escolar.";
 
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  return [
+    `Crea una imagen educativa para la asignatura de ${subjectLabel}.`,
+    style,
+    "Debe ser visualmente clara, útil para estudiantes, con fondo limpio y composición profesional.",
+    "No generes una fotografía periodística ni una escena hiperrealista dudosa.",
+    "No inventes hechos, fechas, datos o elementos que no estén implicados en la solicitud.",
+    "Si la solicitud describe un proceso, representa el proceso con flechas, etiquetas y elementos didácticos.",
+    `Solicitud del estudiante: ${cleanedPrompt}`
+  ].join(" ");
+}
+
+function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
+  const subjectLabel = getSubjectLabel(subjectMode);
+
+  return {
+    type: "text",
+    reply:
+      subjectMode === "mathematics"
+        ? "No pude generar la gráfica exacta en este intento. Reformula la función o vuelve a intentarlo."
+        : `No pude generar la imagen educativa de ${subjectLabel} en este intento. Vuelve a intentarlo.`
+  };
 }
 
 function tryGenerateMathDiagram(prompt) {
@@ -2926,7 +2973,7 @@ Tu estilo:
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
 - Si el estudiante pide un ejercicio, resuelvelo paso a paso.
-- Si detectas confusion, aclara primero la idea clave.
+- Si detectas confusion, aclara primero el punto central.
 - Usa ejemplos numéricos claros cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
 - Si revisas imagenes o PDFs, describe lo relevante y explica el concepto matemático asociado.
@@ -2946,8 +2993,7 @@ Temas frecuentes:
 - Cálculo introductorio para 11°
 
 Formato recomendado:
-- Idea clave
-- Explicacion
+- Explicacion clara
 - Procedimiento
 - Ejemplo o aplicacion
 - Siguiente paso sugerido`;
@@ -2965,7 +3011,7 @@ Tu estilo:
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
 - Si el estudiante pide una tarea, exposición o taller, ayuda a estructurarlo.
-- Si detectas confusión, aclara primero la idea clave.
+- Si detectas confusión, aclara primero el punto central.
 - Usa comparaciones, líneas de tiempo y ejemplos escolares cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
 - Si revisas imágenes o PDFs, describe lo relevante y explica el concepto social, histórico, geográfico o ciudadano asociado.
@@ -2984,7 +3030,6 @@ Temas frecuentes:
 - Conflictos y procesos sociales
 
 Formato recomendado:
-- Idea clave
 - Contexto
 - Explicacion
 - Comparación, línea de tiempo o ejemplo
@@ -3003,7 +3048,7 @@ Tu estilo:
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
 - Si el estudiante pide una tarea, proyecto o exposición, ayuda a estructurarlo.
-- Si detectas confusión, aclara primero la idea clave.
+- Si detectas confusión, aclara primero el punto central.
 - Usa ejemplos cotidianos, procesos naturales y observaciones sencillas cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
 - Si revisas imágenes o PDFs, describe lo relevante y explica el concepto natural o ambiental asociado.
@@ -3024,7 +3069,6 @@ Temas frecuentes:
 - Proyectos escolares ambientales
 
 Formato recomendado:
-- Idea clave
 - Explicacion
 - Ejemplo o proceso
 - Aplicación escolar o ambiental
@@ -3042,7 +3086,7 @@ Tu estilo:
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
 - Si el estudiante pide un ejercicio, resuelvelo paso a paso.
-- Si detectas confusion, aclara primero la idea clave.
+- Si detectas confusion, aclara primero el punto central.
 - Usa ejemplos cotidianos cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
 - Si revisas imagenes o PDFs, describe lo relevante y explica el concepto fisico asociado.
@@ -3059,7 +3103,6 @@ Temas frecuentes:
 - Electricidad, ley de Ohm, circuitos y potencia electrica
 
 Formato recomendado:
-- Idea clave
 - Explicacion
 - Ejemplo o aplicacion
 - Siguiente paso sugerido`;
