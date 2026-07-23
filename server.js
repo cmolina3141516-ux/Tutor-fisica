@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { randomUUID } = require("crypto");
 
 const rootDir = __dirname;
 const publicDir = path.join(rootDir, "public");
@@ -20,6 +21,13 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml"
 };
 
+const accessUsage = new Map();
+const ACCESS_LIMITS = {
+  maxSessionsPerDay: Number(process.env.ACCESS_MAX_SESSIONS_PER_DAY || 3),
+  maxMessagesPerDay: Number(process.env.ACCESS_MAX_MESSAGES_PER_DAY || 30),
+  activeSessionTtlMs: Number(process.env.ACCESS_ACTIVE_SESSION_TTL_MS || 20 * 60 * 1000)
+};
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     sendJson(res, 400, { error: "Solicitud invalida." });
@@ -37,6 +45,34 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo construir la configuración del tutor.";
       sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/access/validate") {
+    try {
+      const body = await readJsonBody(req);
+      const result = startTutorAccessSession(body.code, body.session_id);
+      if (!result.valid) {
+        sendJson(res, 403, { error: result.error });
+        return;
+      }
+
+      sendJson(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo validar el acceso.";
+      sendJson(res, 400, { error: message });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/access/end") {
+    try {
+      const body = await readJsonBody(req);
+      endTutorAccessSession(body.code, body.session_id);
+      sendJson(res, 200, { ended: true });
+    } catch (_error) {
+      sendJson(res, 200, { ended: true });
     }
     return;
   }
@@ -146,6 +182,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/chat") {
     try {
       const body = await readJsonBody(req);
+      const accessResult = registerAccessMessage(body.access);
+      if (!accessResult.valid) {
+        sendJson(res, 403, { error: accessResult.error });
+        return;
+      }
+
       const result = await generateTutorReply(body);
       sendJson(res, 200, result);
     } catch (error) {
@@ -3287,6 +3329,238 @@ function getSubjectMode() {
     return "natural_sciences";
   }
   return "physics";
+}
+
+function startTutorAccessSession(rawCode, rawSessionId) {
+  const baseValidation = validateTutorAccessCode(rawCode);
+  if (!baseValidation.valid) {
+    return baseValidation;
+  }
+
+  const now = Date.now();
+  const sessionId = normalizeSessionId(rawSessionId) || randomUUID();
+  const record = getAccessUsageRecord(baseValidation.code);
+  clearExpiredActiveSession(record, now);
+
+  if (record.activeSessionId && record.activeSessionId !== sessionId) {
+    return {
+      valid: false,
+      error: "Este código ya está siendo usado en otra sesión. Cierra la sesión anterior o espera unos minutos."
+    };
+  }
+
+  if (!record.activeSessionId) {
+    if (record.sessionsToday >= ACCESS_LIMITS.maxSessionsPerDay) {
+      return {
+        valid: false,
+        error: `Ya alcanzaste el límite de ${ACCESS_LIMITS.maxSessionsPerDay} sesiones por hoy.`
+      };
+    }
+
+    record.sessionsToday += 1;
+  }
+
+  record.activeSessionId = sessionId;
+  record.activeUntil = now + ACCESS_LIMITS.activeSessionTtlMs;
+  record.lastSeenAt = now;
+
+  return {
+    valid: true,
+    code: baseValidation.code,
+    sessionId,
+    tutorPrefix: baseValidation.tutorPrefix,
+    limits: buildAccessLimitSummary(record)
+  };
+}
+
+function registerAccessMessage(accessPayload) {
+  const code = normalizeAccessCode(accessPayload?.code);
+  const sessionId = normalizeSessionId(accessPayload?.session_id);
+  const baseValidation = validateTutorAccessCode(code);
+  if (!baseValidation.valid) {
+    return { valid: false, error: "Tu acceso no está autorizado. Ingresa nuevamente tu código." };
+  }
+
+  if (!sessionId) {
+    return { valid: false, error: "No se encontró una sesión activa. Ingresa nuevamente tu código." };
+  }
+
+  const now = Date.now();
+  const record = getAccessUsageRecord(baseValidation.code);
+  clearExpiredActiveSession(record, now);
+
+  if (record.activeSessionId !== sessionId) {
+    return {
+      valid: false,
+      error: "Este código está activo en otra sesión o la sesión venció. Ingresa nuevamente tu código."
+    };
+  }
+
+  if (record.messagesToday >= ACCESS_LIMITS.maxMessagesPerDay) {
+    return {
+      valid: false,
+      error: `Ya alcanzaste el límite de ${ACCESS_LIMITS.maxMessagesPerDay} mensajes por hoy.`
+    };
+  }
+
+  record.messagesToday += 1;
+  record.activeUntil = now + ACCESS_LIMITS.activeSessionTtlMs;
+  record.lastSeenAt = now;
+
+  return { valid: true, limits: buildAccessLimitSummary(record) };
+}
+
+function endTutorAccessSession(rawCode, rawSessionId) {
+  const code = normalizeAccessCode(rawCode);
+  const sessionId = normalizeSessionId(rawSessionId);
+  if (!code || !sessionId) {
+    return;
+  }
+
+  const record = accessUsage.get(code);
+  if (record?.activeSessionId === sessionId) {
+    record.activeSessionId = "";
+    record.activeUntil = 0;
+  }
+}
+
+function validateTutorAccessCode(rawCode) {
+  const code = normalizeAccessCode(rawCode);
+  if (!code) {
+    return { valid: false, error: "Escribe tu código de acceso." };
+  }
+
+  const expectedPrefix = getTutorAccessPrefix();
+  const allowedCodes = getAllowedAccessCodes();
+  if (allowedCodes.size > 0) {
+    if (!allowedCodes.has(code)) {
+      return { valid: false, error: "Este código no está autorizado para este tutor." };
+    }
+
+    if (!code.startsWith(`${expectedPrefix}-`)) {
+      return { valid: false, error: `Este código pertenece a otro tutor. Debe iniciar por ${expectedPrefix}.` };
+    }
+
+    return { valid: true, code, tutorPrefix: expectedPrefix };
+  }
+
+  const pattern = new RegExp(`^${expectedPrefix}-[A-Z0-9]{4}-[A-Z0-9]{4}-\\d{8}$`);
+  if (!pattern.test(code)) {
+    return {
+      valid: false,
+      error: `Código inválido. Para este tutor debe tener el formato ${expectedPrefix}-XXXX-XXXX-AAAAMMDD.`
+    };
+  }
+
+  return { valid: true, code, tutorPrefix: expectedPrefix };
+}
+
+function getAccessUsageRecord(code) {
+  const today = getAccessDayKey();
+  const existing = accessUsage.get(code);
+  if (existing && existing.dayKey === today) {
+    return existing;
+  }
+
+  const fresh = {
+    dayKey: today,
+    sessionsToday: 0,
+    messagesToday: 0,
+    activeSessionId: "",
+    activeUntil: 0,
+    lastSeenAt: 0
+  };
+  accessUsage.set(code, fresh);
+  return fresh;
+}
+
+function clearExpiredActiveSession(record, now) {
+  if (record.activeSessionId && record.activeUntil <= now) {
+    record.activeSessionId = "";
+    record.activeUntil = 0;
+  }
+}
+
+function buildAccessLimitSummary(record) {
+  return {
+    sessionsToday: record.sessionsToday,
+    maxSessionsPerDay: ACCESS_LIMITS.maxSessionsPerDay,
+    messagesToday: record.messagesToday,
+    maxMessagesPerDay: ACCESS_LIMITS.maxMessagesPerDay,
+    activeSessionExpiresAt: record.activeUntil ? new Date(record.activeUntil).toISOString() : null
+  };
+}
+
+function getAccessDayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeSessionId(value) {
+  const sessionId = String(value || "").trim();
+  return /^[a-zA-Z0-9-]{16,80}$/.test(sessionId) ? sessionId : "";
+}
+
+function getAllowedAccessCodes() {
+  const raw = String(process.env.ACCESS_CODES || "").trim();
+  if (!raw) {
+    return new Set();
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return new Set(parsed.map(normalizeAccessCode).filter(Boolean));
+    }
+  } catch (_error) {
+    // ACCESS_CODES also supports a simple comma-separated list for easy Render setup.
+  }
+
+  return new Set(raw.split(/[,\n;]/).map(normalizeAccessCode).filter(Boolean));
+}
+
+function getTutorAccessPrefix() {
+  const tutorName = removeAccents(String(process.env.TUTOR_NAME || "")).toLowerCase();
+  if (tutorName.includes("esteban")) {
+    return "ESTEBAN";
+  }
+  if (tutorName.includes("andres")) {
+    return "ANDRES";
+  }
+  if (tutorName.includes("laura")) {
+    return "LAURA";
+  }
+  if (tutorName.includes("felipe")) {
+    return "FELIPE";
+  }
+  if (tutorName.includes("mateo")) {
+    return "MATEO";
+  }
+  if (tutorName.includes("emily")) {
+    return "EMILY";
+  }
+
+  const subjectMode = getSubjectMode();
+  if (subjectMode === "mathematics") {
+    return "ESTEBAN";
+  }
+  if (subjectMode === "social_studies") {
+    return "LAURA";
+  }
+  if (subjectMode === "natural_sciences") {
+    return "ANDRES";
+  }
+  return "JULIAN";
+}
+
+function normalizeAccessCode(value) {
+  return removeAccents(String(value || ""))
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function removeAccents(value) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function buildFallbackSystemPrompt() {

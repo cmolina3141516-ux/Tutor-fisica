@@ -13,6 +13,36 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="app-loading">
+    <section class="access-gate" id="accessGate" role="dialog" aria-modal="true" aria-labelledby="accessGateTitle" hidden>
+      <div class="access-gate-card">
+        <p class="eyebrow">Acceso Innova School</p>
+        <h2 id="accessGateTitle">Ingresa tu código de acceso</h2>
+        <p>
+          Usa la credencial que recibiste por WhatsApp o correo después de confirmar tu pago.
+        </p>
+        <form id="accessForm" class="access-form">
+          <label for="accessCodeInput">Código de acceso</label>
+          <input
+            id="accessCodeInput"
+            type="text"
+            autocomplete="one-time-code"
+            placeholder="Ej. JULIAN-8K4P-M2Q9-20260723"
+            required
+          />
+          <button type="submit">Entrar al tutor</button>
+        </form>
+        <p id="accessError" class="access-error" aria-live="polite"></p>
+        <a
+          class="access-help"
+          href="https://wa.me/573013364867?text=Hola%2C%20solicito%20acceso%20a%20Innova%20School.%0A%0ANombre%3A%0AGrado%3A%0ACorreo%3A%0AAdjunto%20comprobante%20de%20pago."
+          target="_blank"
+          rel="noreferrer"
+        >
+          Solicitar ayuda por WhatsApp
+        </a>
+      </div>
+    </section>
+
     <main class="shell">
       <section class="card hero">
         <div class="hero-copy">

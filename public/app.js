@@ -2,6 +2,11 @@ const state = {
   tutorName: "Profesor Julián",
   schoolName: "Virtual Planet",
   subjectName: "Física y Matemáticas",
+  initialConfig: null,
+  accessGranted: false,
+  accessCode: "",
+  accessSessionId: "",
+  tutorSessionStarted: false,
   messages: [],
   activeQuiz: null,
   pendingAttachments: [],
@@ -22,6 +27,10 @@ const state = {
 };
 
 const elements = {
+  accessGate: document.getElementById("accessGate"),
+  accessForm: document.getElementById("accessForm"),
+  accessCodeInput: document.getElementById("accessCodeInput"),
+  accessError: document.getElementById("accessError"),
   heroEyebrow: document.getElementById("heroEyebrow"),
   heroTitle: document.getElementById("heroTitle"),
   heroLead: document.getElementById("heroLead"),
@@ -67,10 +76,24 @@ const elements = {
   mode: document.getElementById("mode")
 };
 
+const ACCESS_STORAGE_KEY = "innovaTutorAccessCode";
+const ACCESS_SESSION_STORAGE_KEY = "innovaTutorAccessSessionId";
+
 bootstrap().catch((error) => {
   document.body.classList.remove("app-loading");
   appendMessage("assistant", `No pude iniciar el tutor: ${error.message}`);
 });
+
+if (elements.accessForm) {
+  elements.accessForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const code = elements.accessCodeInput.value.trim();
+    const isValid = await validateAccessCode(code, true);
+    if (isValid) {
+      startTutorSession(state.initialConfig || {});
+    }
+  });
+}
 
 elements.voiceButton.addEventListener("click", () => {
   toggleVoiceInput();
@@ -112,6 +135,10 @@ elements.voiceSelect.addEventListener("change", () => {
   state.selectedVoiceName = elements.voiceSelect.value;
 });
 
+window.addEventListener("pagehide", () => {
+  endAccessSession();
+});
+
 elements.attachButton.addEventListener("click", () => {
   elements.fileInput.click();
 });
@@ -131,6 +158,10 @@ document.addEventListener("paste", handlePasteEvent);
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.accessGranted) {
+    showAccessGate("Ingresa tu código de acceso para iniciar el tutor.");
+    return;
+  }
   const text = elements.input.value.trim();
   if (state.avatarClosed) {
     showSessionAlert("Avatar cerrado", "La sesión terminó. Recarga la página para iniciar otra sesión.");
@@ -160,6 +191,7 @@ elements.form.addEventListener("submit", async (event) => {
 async function bootstrap() {
   const response = await fetch("/api/config");
   const config = await response.json();
+  state.initialConfig = config;
 
   state.avatarClosed = false;
   state.sessionStartedAt = Date.now();
@@ -205,6 +237,152 @@ async function bootstrap() {
     elements.suggestedPrompts.appendChild(button);
   }
 
+  setChatLocked(true);
+  const hasAccess = await initializeAccessGate();
+  document.body.classList.remove("app-loading");
+  if (!hasAccess) {
+    return;
+  }
+
+  startTutorSession(config);
+}
+
+async function initializeAccessGate() {
+  const params = new URLSearchParams(window.location.search);
+  const codeFromUrl = params.get("code") || params.get("access");
+  const storedCode = window.sessionStorage.getItem(ACCESS_STORAGE_KEY);
+  const storedSessionId = window.sessionStorage.getItem(ACCESS_SESSION_STORAGE_KEY);
+  const preferredCode = codeFromUrl || storedCode || "";
+  if (storedSessionId) {
+    state.accessSessionId = storedSessionId;
+  }
+
+  if (preferredCode && elements.accessCodeInput) {
+    elements.accessCodeInput.value = preferredCode;
+    const isValid = await validateAccessCode(preferredCode, false);
+    if (isValid) {
+      return true;
+    }
+  }
+
+  showAccessGate();
+  return false;
+}
+
+async function validateAccessCode(rawCode, showErrors) {
+  const code = normalizeAccessCode(rawCode);
+  if (!code) {
+    if (showErrors) {
+      showAccessGate("Escribe el código de acceso que recibiste.");
+    }
+    return false;
+  }
+
+  setAccessBusy(true);
+  try {
+    const response = await fetch("/api/access/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        code,
+        session_id: state.accessSessionId
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.valid) {
+      throw new Error(data.error || "Código no autorizado.");
+    }
+
+    state.accessGranted = true;
+    state.accessCode = data.code || code;
+    state.accessSessionId = data.sessionId || state.accessSessionId;
+    window.sessionStorage.setItem(ACCESS_STORAGE_KEY, state.accessCode);
+    if (state.accessSessionId) {
+      window.sessionStorage.setItem(ACCESS_SESSION_STORAGE_KEY, state.accessSessionId);
+    }
+    hideAccessGate();
+    setChatLocked(false);
+    return true;
+  } catch (error) {
+    if (showErrors) {
+      showAccessGate(error.message || "No se pudo validar el código.");
+    }
+    return false;
+  } finally {
+    setAccessBusy(false);
+  }
+}
+
+function normalizeAccessCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function showAccessGate(message = "") {
+  if (!elements.accessGate) {
+    return;
+  }
+  elements.accessGate.hidden = false;
+  document.body.classList.add("access-locked");
+  if (elements.accessError) {
+    elements.accessError.textContent = message;
+  }
+  window.setTimeout(() => {
+    elements.accessCodeInput?.focus();
+  }, 30);
+}
+
+function hideAccessGate() {
+  if (!elements.accessGate) {
+    return;
+  }
+  elements.accessGate.hidden = true;
+  document.body.classList.remove("access-locked");
+  if (elements.accessError) {
+    elements.accessError.textContent = "";
+  }
+}
+
+function setAccessBusy(isBusy) {
+  if (!elements.accessForm) {
+    return;
+  }
+  const submitButton = elements.accessForm.querySelector("button[type='submit']");
+  if (submitButton) {
+    submitButton.disabled = isBusy;
+    submitButton.textContent = isBusy ? "Validando..." : "Entrar al tutor";
+  }
+}
+
+function setChatLocked(isLocked) {
+  elements.input.disabled = isLocked;
+  elements.sendButton.disabled = isLocked;
+  elements.attachButton.disabled = isLocked;
+  elements.pasteImageButton.disabled = isLocked;
+  elements.voiceButton.disabled = isLocked;
+  elements.handsFreeButton.disabled = isLocked;
+  elements.pauseVoiceButton.disabled = isLocked;
+  elements.listenButton.disabled = isLocked;
+  if (isLocked) {
+    elements.statusPill.textContent = "Acceso";
+    elements.input.placeholder = "Ingresa tu código de acceso para iniciar...";
+  } else if (state.initialConfig?.messagePlaceholder) {
+    elements.input.placeholder = state.initialConfig.messagePlaceholder;
+  }
+}
+
+function startTutorSession(config) {
+  if (state.tutorSessionStarted) {
+    return;
+  }
+  state.tutorSessionStarted = true;
+  state.sessionStartedAt = Date.now();
+  state.sessionWarned = false;
+
   appendMessage(
     "assistant",
     config.welcomeMessage ||
@@ -220,7 +398,31 @@ async function bootstrap() {
       populateVoiceOptions();
     };
   }
-  document.body.classList.remove("app-loading");
+}
+
+function endAccessSession() {
+  if (!state.accessCode || !state.accessSessionId) {
+    return;
+  }
+
+  const payload = JSON.stringify({
+    code: state.accessCode,
+    session_id: state.accessSessionId
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon("/api/access/end", new Blob([payload], { type: "application/json" }));
+    return;
+  }
+
+  fetch("/api/access/end", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: payload,
+    keepalive: true
+  }).catch(() => {});
 }
 
 function setHeroAvatar(src, alt) {
@@ -250,6 +452,10 @@ async function askTutor(userText, attachments = []) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
+      access: {
+        code: state.accessCode,
+        session_id: state.accessSessionId
+      },
       session: getSessionContext(),
       messages: nextMessages,
       generate_image: wantsImage
