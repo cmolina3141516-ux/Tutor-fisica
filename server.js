@@ -27,6 +27,8 @@ const ACCESS_LIMITS = {
   maxMessagesPerDay: Number(process.env.ACCESS_MAX_MESSAGES_PER_DAY || 30),
   activeSessionTtlMs: Number(process.env.ACCESS_ACTIVE_SESSION_TTL_MS || 20 * 60 * 1000)
 };
+const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+const SUPABASE_SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
 
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
@@ -52,7 +54,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/access/validate") {
     try {
       const body = await readJsonBody(req);
-      const result = startTutorAccessSession(body.code, body.session_id);
+      const result = await startTutorAccessSession(body.code, body.session_id);
       if (!result.valid) {
         sendJson(res, 403, { error: result.error });
         return;
@@ -69,7 +71,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/access/end") {
     try {
       const body = await readJsonBody(req);
-      endTutorAccessSession(body.code, body.session_id);
+      await endTutorAccessSession(body.code, body.session_id);
       sendJson(res, 200, { ended: true });
     } catch (_error) {
       sendJson(res, 200, { ended: true });
@@ -182,7 +184,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/chat") {
     try {
       const body = await readJsonBody(req);
-      const accessResult = registerAccessMessage(body.access);
+      const accessResult = await registerAccessMessage(body.access);
       if (!accessResult.valid) {
         sendJson(res, 403, { error: accessResult.error });
         return;
@@ -3331,7 +3333,15 @@ function getSubjectMode() {
   return "physics";
 }
 
-function startTutorAccessSession(rawCode, rawSessionId) {
+async function startTutorAccessSession(rawCode, rawSessionId) {
+  if (isSupabaseConfigured()) {
+    return startSupabaseAccessSession(rawCode, rawSessionId);
+  }
+
+  return startMemoryTutorAccessSession(rawCode, rawSessionId);
+}
+
+function startMemoryTutorAccessSession(rawCode, rawSessionId) {
   const baseValidation = validateTutorAccessCode(rawCode);
   if (!baseValidation.valid) {
     return baseValidation;
@@ -3373,7 +3383,15 @@ function startTutorAccessSession(rawCode, rawSessionId) {
   };
 }
 
-function registerAccessMessage(accessPayload) {
+async function registerAccessMessage(accessPayload) {
+  if (isSupabaseConfigured()) {
+    return registerSupabaseAccessMessage(accessPayload);
+  }
+
+  return registerMemoryAccessMessage(accessPayload);
+}
+
+function registerMemoryAccessMessage(accessPayload) {
   const code = normalizeAccessCode(accessPayload?.code);
   const sessionId = normalizeSessionId(accessPayload?.session_id);
   const baseValidation = validateTutorAccessCode(code);
@@ -3410,7 +3428,16 @@ function registerAccessMessage(accessPayload) {
   return { valid: true, limits: buildAccessLimitSummary(record) };
 }
 
-function endTutorAccessSession(rawCode, rawSessionId) {
+async function endTutorAccessSession(rawCode, rawSessionId) {
+  if (isSupabaseConfigured()) {
+    await endSupabaseAccessSession(rawCode, rawSessionId);
+    return;
+  }
+
+  endMemoryTutorAccessSession(rawCode, rawSessionId);
+}
+
+function endMemoryTutorAccessSession(rawCode, rawSessionId) {
   const code = normalizeAccessCode(rawCode);
   const sessionId = normalizeSessionId(rawSessionId);
   if (!code || !sessionId) {
@@ -3453,6 +3480,266 @@ function validateTutorAccessCode(rawCode) {
   }
 
   return { valid: true, code, tutorPrefix: expectedPrefix };
+}
+
+async function startSupabaseAccessSession(rawCode, rawSessionId) {
+  const baseValidation = await validateSupabaseAccessCode(rawCode);
+  if (!baseValidation.valid) {
+    return baseValidation;
+  }
+
+  const now = new Date();
+  const sessionId = normalizeSessionId(rawSessionId) || randomUUID();
+  const limits = getAccessLimitsFromCodeRow(baseValidation.record);
+  const activeSessions = await getSupabaseActiveSessions(baseValidation.code, now);
+  const otherActiveSession = activeSessions.find((session) => session.id !== sessionId);
+  if (otherActiveSession) {
+    return {
+      valid: false,
+      error: "Este código ya está siendo usado en otra sesión. Cierra la sesión anterior o espera unos minutos."
+    };
+  }
+
+  const usage = await getSupabaseUsageRecord(baseValidation.code);
+  const hasCurrentActiveSession = activeSessions.some((session) => session.id === sessionId);
+  if (!hasCurrentActiveSession && usage.sessions_count >= limits.maxSessionsPerDay) {
+    return {
+      valid: false,
+      error: `Ya alcanzaste el límite de ${limits.maxSessionsPerDay} sesiones por hoy.`
+    };
+  }
+
+  const nextUsage = hasCurrentActiveSession
+    ? usage
+    : await upsertSupabaseUsage(baseValidation.code, {
+        sessions_count: usage.sessions_count + 1,
+        messages_count: usage.messages_count
+      });
+
+  await upsertSupabaseSession({
+    id: sessionId,
+    code: baseValidation.code,
+    started_at: hasCurrentActiveSession ? undefined : now.toISOString(),
+    last_seen_at: now.toISOString(),
+    ended_at: null,
+    is_active: true
+  });
+
+  return {
+    valid: true,
+    code: baseValidation.code,
+    sessionId,
+    tutorPrefix: baseValidation.tutorPrefix,
+    limits: buildSupabaseLimitSummary(nextUsage, limits, now)
+  };
+}
+
+async function registerSupabaseAccessMessage(accessPayload) {
+  const code = normalizeAccessCode(accessPayload?.code);
+  const sessionId = normalizeSessionId(accessPayload?.session_id);
+  const baseValidation = await validateSupabaseAccessCode(code);
+  if (!baseValidation.valid) {
+    return { valid: false, error: "Tu acceso no está autorizado. Ingresa nuevamente tu código." };
+  }
+
+  if (!sessionId) {
+    return { valid: false, error: "No se encontró una sesión activa. Ingresa nuevamente tu código." };
+  }
+
+  const now = new Date();
+  const limits = getAccessLimitsFromCodeRow(baseValidation.record);
+  const activeSessions = await getSupabaseActiveSessions(baseValidation.code, now);
+  const currentSession = activeSessions.find((session) => session.id === sessionId);
+  if (!currentSession) {
+    return {
+      valid: false,
+      error: "Este código está activo en otra sesión o la sesión venció. Ingresa nuevamente tu código."
+    };
+  }
+
+  const usage = await getSupabaseUsageRecord(baseValidation.code);
+  if (usage.messages_count >= limits.maxMessagesPerDay) {
+    return {
+      valid: false,
+      error: `Ya alcanzaste el límite de ${limits.maxMessagesPerDay} mensajes por hoy.`
+    };
+  }
+
+  const nextUsage = await upsertSupabaseUsage(baseValidation.code, {
+    sessions_count: usage.sessions_count,
+    messages_count: usage.messages_count + 1
+  });
+  await patchSupabaseSession(sessionId, {
+    last_seen_at: now.toISOString(),
+    is_active: true
+  });
+
+  return { valid: true, limits: buildSupabaseLimitSummary(nextUsage, limits, now) };
+}
+
+async function endSupabaseAccessSession(rawCode, rawSessionId) {
+  const code = normalizeAccessCode(rawCode);
+  const sessionId = normalizeSessionId(rawSessionId);
+  if (!code || !sessionId) {
+    return;
+  }
+
+  await supabaseRequest(`access_sessions?id=eq.${encodeURIComponent(sessionId)}&code=eq.${encodeURIComponent(code)}`, {
+    method: "PATCH",
+    body: {
+      is_active: false,
+      ended_at: new Date().toISOString()
+    }
+  });
+}
+
+async function validateSupabaseAccessCode(rawCode) {
+  const code = normalizeAccessCode(rawCode);
+  if (!code) {
+    return { valid: false, error: "Escribe tu código de acceso." };
+  }
+
+  const rows = await supabaseRequest(`access_codes?code=eq.${encodeURIComponent(code)}&select=*`);
+  const record = Array.isArray(rows) ? rows[0] : null;
+  if (!record) {
+    return { valid: false, error: "Este código no existe o no está autorizado." };
+  }
+
+  if (record.is_active === false) {
+    return { valid: false, error: "Este código está desactivado." };
+  }
+
+  const expectedPrefix = getTutorAccessPrefix();
+  const tutorPrefix = normalizeAccessCode(record.tutor_prefix || code.split("-")[0]);
+  if (tutorPrefix !== expectedPrefix) {
+    return { valid: false, error: `Este código pertenece a otro tutor. Debe iniciar por ${expectedPrefix}.` };
+  }
+
+  if (record.expires_at && new Date(record.expires_at).getTime() < Date.now()) {
+    return { valid: false, error: "Este código ya venció." };
+  }
+
+  return { valid: true, code, tutorPrefix, record };
+}
+
+async function getSupabaseActiveSessions(code, now) {
+  const sessions = await supabaseRequest(
+    `access_sessions?code=eq.${encodeURIComponent(code)}&is_active=eq.true&select=id,last_seen_at`
+  );
+  const active = [];
+  for (const session of sessions || []) {
+    const lastSeenAt = new Date(session.last_seen_at || 0).getTime();
+    if (lastSeenAt && now.getTime() - lastSeenAt <= ACCESS_LIMITS.activeSessionTtlMs) {
+      active.push(session);
+      continue;
+    }
+
+    await patchSupabaseSession(session.id, {
+      is_active: false,
+      ended_at: now.toISOString()
+    });
+  }
+
+  return active;
+}
+
+async function getSupabaseUsageRecord(code) {
+  const usageDate = getAccessDayKey();
+  const rows = await supabaseRequest(
+    `access_usage?code=eq.${encodeURIComponent(code)}&usage_date=eq.${usageDate}&select=*`
+  );
+  const existing = Array.isArray(rows) ? rows[0] : null;
+  if (existing) {
+    return {
+      code,
+      usage_date: usageDate,
+      sessions_count: Number(existing.sessions_count || 0),
+      messages_count: Number(existing.messages_count || 0)
+    };
+  }
+
+  return upsertSupabaseUsage(code, {
+    sessions_count: 0,
+    messages_count: 0
+  });
+}
+
+async function upsertSupabaseUsage(code, usage) {
+  const usageDate = getAccessDayKey();
+  const payload = {
+    code,
+    usage_date: usageDate,
+    sessions_count: Number(usage.sessions_count || 0),
+    messages_count: Number(usage.messages_count || 0)
+  };
+  await supabaseRequest("access_usage?on_conflict=code,usage_date", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates",
+    body: payload
+  });
+  return payload;
+}
+
+async function upsertSupabaseSession(session) {
+  const payload = Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined));
+  await supabaseRequest("access_sessions?on_conflict=id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates",
+    body: payload
+  });
+}
+
+async function patchSupabaseSession(sessionId, payload) {
+  await supabaseRequest(`access_sessions?id=eq.${encodeURIComponent(sessionId)}`, {
+    method: "PATCH",
+    body: payload
+  });
+}
+
+function getAccessLimitsFromCodeRow(record) {
+  return {
+    maxSessionsPerDay: Number(record?.max_sessions_per_day || ACCESS_LIMITS.maxSessionsPerDay),
+    maxMessagesPerDay: Number(record?.max_messages_per_day || ACCESS_LIMITS.maxMessagesPerDay)
+  };
+}
+
+function buildSupabaseLimitSummary(usage, limits, now) {
+  return {
+    sessionsToday: usage.sessions_count,
+    maxSessionsPerDay: limits.maxSessionsPerDay,
+    messagesToday: usage.messages_count,
+    maxMessagesPerDay: limits.maxMessagesPerDay,
+    activeSessionExpiresAt: new Date(now.getTime() + ACCESS_LIMITS.activeSessionTtlMs).toISOString()
+  };
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: options.prefer ? `return=minimal,${options.prefer}` : "return=representation"
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Supabase devolvió ${response.status}: ${detail || response.statusText}`);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function isSupabaseConfigured() {
+  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
 function getAccessUsageRecord(code) {
