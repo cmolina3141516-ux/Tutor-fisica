@@ -203,6 +203,15 @@ body {
   position: relative;
 }
 
+.hero-avatar {
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.hero-avatar.is-loaded {
+  opacity: 1;
+}
+
 .avatar-closed-overlay {
   display: none;
   position: absolute;

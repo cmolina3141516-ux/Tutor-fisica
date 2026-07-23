@@ -178,8 +178,7 @@ async function bootstrap() {
   elements.heroLead.textContent = config.heroLead || elements.heroLead.textContent;
   elements.heroQuoteText.textContent = config.heroQuoteText || elements.heroQuoteText.textContent;
   elements.heroQuoteAuthor.textContent = config.heroQuoteAuthor || elements.heroQuoteAuthor.textContent;
-  elements.heroAvatar.src = config.avatarUrl || elements.heroAvatar.src;
-  elements.heroAvatar.alt = config.avatarAlt || `Avatar de ${state.tutorName}`;
+  setHeroAvatar(config.avatarUrl, config.avatarAlt || `Avatar de ${state.tutorName}`);
   elements.chatEyebrow.textContent = config.chatEyebrow || "Aula interactiva";
   elements.chatTitle.textContent = `Sesión con ${state.tutorName}`;
   elements.timerKicker.textContent = config.timerKicker || "Tiempo de trabajo";
@@ -222,6 +221,20 @@ async function bootstrap() {
     };
   }
   document.body.classList.remove("app-loading");
+}
+
+function setHeroAvatar(src, alt) {
+  const fallbackSrc = elements.heroAvatar.src;
+  const nextSrc = src || fallbackSrc;
+  elements.heroAvatar.classList.remove("is-loaded");
+  elements.heroAvatar.alt = alt;
+  elements.heroAvatar.onload = () => {
+    elements.heroAvatar.classList.add("is-loaded");
+  };
+  elements.heroAvatar.onerror = () => {
+    elements.heroAvatar.alt = "No se pudo cargar el avatar del tutor";
+  };
+  elements.heroAvatar.src = nextSrc;
 }
 
 async function askTutor(userText, attachments = []) {
