@@ -29,10 +29,15 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/api/config") {
-    const tutorConfig = buildTutorConfig();
-    sendJson(res, 200, {
-      ...tutorConfig
-    });
+    try {
+      const tutorConfig = buildTutorConfig();
+      sendJson(res, 200, {
+        ...tutorConfig
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo construir la configuración del tutor.";
+      sendJson(res, 500, { error: message });
+    }
     return;
   }
 
@@ -3045,7 +3050,7 @@ function buildTutorConfig() {
     };
   }
 
-  const hybridPhysicsMathTutor = isHybridPhysicsMathTutor();
+  const hybridPhysicsMathTutor = getSubjectMode() === "physics";
 
   return {
     schoolName,
