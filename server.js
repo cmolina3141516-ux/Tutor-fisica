@@ -204,7 +204,7 @@ async function generateTutorReply(payload) {
     return {
       type: "text",
       reply:
-        "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Educación Ambiental. Si quieres, puedo ayudarte con ecosistemas, célula, biodiversidad, ambiente, método científico, materia y proyectos escolares ambientales."
+        "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Química. Si quieres, puedo ayudarte con biología, ecología, ambiente, método científico, materia, reacciones químicas, estequiometría, soluciones, laboratorio o proyectos escolares científicos."
     };
   }
   if (
@@ -457,11 +457,11 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt }) {
 
 function getSubjectLabel(subjectMode) {
   return subjectMode === "mathematics"
-    ? "Matemáticas"
-    : subjectMode === "social_studies"
-      ? "Ciencias Sociales"
+      ? "Matemáticas"
+      : subjectMode === "social_studies"
+        ? "Ciencias Sociales"
       : subjectMode === "natural_sciences"
-        ? "Ciencias Naturales y Educación Ambiental"
+        ? "Ciencias Naturales y Química"
         : "Física";
 }
 
@@ -472,7 +472,7 @@ function buildSubjectImagePrompt({ subjectMode, prompt }) {
     subjectMode === "social_studies"
       ? "Infografía escolar o diagrama histórico-social claro, neutral, riguroso, sin propaganda, sin hechos inventados, con composición tipo libro de texto."
       : subjectMode === "natural_sciences"
-        ? "Infografía o diagrama científico escolar, claro, ordenado, factual, estilo libro de ciencias, con flechas, etiquetas y procesos bien definidos."
+        ? "Infografía o diagrama científico escolar, claro, ordenado, factual, estilo libro de ciencias naturales o química, con flechas, etiquetas, símbolos químicos correctos y procesos bien definidos."
         : subjectMode === "physics"
           ? "Diagrama o ilustración educativa de física, limpio, técnico, con ejes, flechas, símbolos y etiquetas claras, estilo libro escolar."
           : "Infografía o esquema matemático limpio, exacto, con ejes, escalas, rótulos y composición de libro escolar.";
@@ -2249,7 +2249,7 @@ function buildStudentContext(session) {
       : subjectMode === "social_studies"
         ? "Ciencias sociales generales"
         : subjectMode === "natural_sciences"
-          ? "Ciencias naturales y ambiente"
+          ? "Ciencias naturales y química"
         : "Fisica general";
   const lines = [
     `Nombre del estudiante: ${session.student_name || "No indicado"}`,
@@ -2272,7 +2272,7 @@ function parseQuizReply(reply) {
       : subjectMode === "social_studies"
         ? "Quiz rapido de ciencias sociales"
         : subjectMode === "natural_sciences"
-          ? "Quiz rapido de ciencias naturales"
+          ? "Quiz rapido de ciencias naturales y química"
         : "Quiz rapido de fisica";
   let parsed;
   try {
@@ -2560,6 +2560,11 @@ function shouldRejectAsNonNaturalSciences(text) {
 
   const naturalCues = [
     "ciencias naturales",
+    "quimica",
+    "quimico",
+    "quimica organica",
+    "quimica inorganica",
+    "bioquimica",
     "ambiente",
     "ambiental",
     "ecosistema",
@@ -2571,14 +2576,54 @@ function shouldRejectAsNonNaturalSciences(text) {
     "seres vivos",
     "metodo cientifico",
     "materia",
+    "atomo",
+    "molecula",
+    "elemento",
+    "compuesto",
+    "tabla periodica",
+    "enlace quimico",
+    "ionico",
+    "covalente",
+    "metalico",
+    "valencia",
+    "numero de oxidacion",
+    "nomenclatura",
+    "formula quimica",
+    "reaccion quimica",
+    "balanceo",
+    "estequiometria",
+    "mol",
+    "masa molar",
+    "reactivo limite",
+    "rendimiento",
+    "solubilidad",
     "mezclas",
     "soluciones",
+    "concentracion",
+    "molaridad",
+    "molalidad",
+    "ph",
+    "acido",
+    "base",
+    "neutralizacion",
+    "sales",
+    "gases",
+    "ley de boyle",
+    "ley de charles",
+    "ley de avogadro",
+    "termoquimica",
+    "redox",
+    "oxidacion",
+    "reduccion",
+    "hidrocarburo",
+    "alcohol",
+    "laboratorio",
+    "seguridad en laboratorio",
     "reciclaje",
     "sostenibilidad",
     "huerta",
     "reino animal",
     "reino vegetal",
-    "quimica basica",
     "biologia"
   ];
 
@@ -2688,7 +2733,7 @@ function shouldAskForClarification({ message, subjectMode }) {
   }
 
   if (subjectMode === "natural_sciences") {
-    return /ecosistema|celula|biodiversidad|ambiente|metodo cientifico|materia|energia|fotosintesis|respiracion|reino animal|reino vegetal|ciclo del carbono|ciclo del agua|genetica|quimica/.test(
+    return /ecosistema|celula|biodiversidad|ambiente|metodo cientifico|materia|energia|fotosintesis|respiracion|reino animal|reino vegetal|ciclo del carbono|ciclo del agua|genetica|quimica|atomo|molecula|tabla periodica|enlace|reaccion|balanceo|estequiometria|mol|solucion|concentracion|molaridad|ph|acido|base|gases|redox|laboratorio/.test(
       normalized
     );
   }
@@ -2706,7 +2751,7 @@ function buildClarificationReply({ message, subjectMode }) {
       : subjectMode === "social_studies"
         ? "ciencias sociales"
         : subjectMode === "natural_sciences"
-          ? "ciencias naturales y educación ambiental"
+          ? "ciencias naturales y química"
           : "física";
 
   const safeTopic = topic || `ese tema de ${subjectName}`;
@@ -3013,39 +3058,41 @@ function buildTutorConfig() {
     return {
       schoolName,
       tutorName,
-      subjectName: "Ciencias Naturales y Educación Ambiental",
-      pageTitle: "Tutor de Ciencias Naturales Embebible",
-      heroEyebrow: "Tutor IA de Ciencias Naturales",
+      subjectName: "Ciencias Naturales y Química",
+      pageTitle: "Tutor de Ciencias Naturales y Química Embebible",
+      heroEyebrow: "Tutor IA de Ciencias Naturales y Química",
       heroLead:
-        "Explicaciones claras, apoyo en proyectos transversales, aclaración de dudas, ideas de investigación escolar y orientación en ciencias naturales y educación ambiental.",
+        "Explicaciones claras, resolución de problemas, apoyo en proyectos transversales, presentaciones, prácticas de laboratorio y aclaración de dudas en ciencias naturales y química.",
       heroQuoteText:
-        '"Comprender la naturaleza y cuidar el entorno nos ayuda a pensar mejor, actuar con responsabilidad y construir soluciones para la vida cotidiana."',
-      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN CIENCIAS NATURALES",
+        '"Comprender la naturaleza y la química nos permite explicar la vida, transformar materiales con responsabilidad y cuidar mejor el planeta que habitamos."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN CIENCIAS NATURALES Y QUÍMICA",
       avatarUrl: process.env.AVATAR_URL || "https://i.postimg.cc/hjYGs0F0/PROFE-ANDRES-CIENCIAS-NATURALES.png",
-      avatarAlt: "Avatar del profesor de ciencias naturales",
+      avatarAlt: "Avatar del profesor de ciencias naturales y química",
       chatEyebrow: "Aula interactiva",
       timerKicker: "Tiempo de trabajo",
       timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
       topicLabel: "Tema",
       goalLabel: "Objetivo",
-      defaultTopic: "Ciencias naturales y ambiente",
-      defaultLearningGoal: "Comprender el tema, aclarar dudas y desarrollar ideas de proyecto",
-      messagePlaceholder: "Escribe tu duda de ciencias naturales aquí...",
+      defaultTopic: "Ciencias naturales y química",
+      defaultLearningGoal: "Comprender el tema, resolver problemas y desarrollar proyectos científicos",
+      messagePlaceholder: "Escribe tu duda de ciencias naturales o química aquí...",
       helperText:
-        "Consejo: pide explicaciones, ideas de proyectos, quizzes, análisis de imágenes o apoyo para educación ambiental.",
+        "Consejo: pide explicaciones, problemas de química paso a paso, ideas de proyectos, quizzes, análisis de imágenes o apoyo para presentaciones.",
       welcomeMessage:
-        "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, proyectos transversales, resolución de dudas e ideas relacionadas con Ciencias Naturales y Educación Ambiental. Este tutor trabaja solo dentro de esta asignatura.",
+        "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, resolución de problemas, proyectos transversales, presentaciones, prácticas de laboratorio y aclaración de dudas sobre Ciencias Naturales y Química. Este tutor trabaja solo dentro de estas áreas.",
       suggestedPrompts: [
         "Explícame ecosistemas y cadenas alimenticias de forma sencilla",
-        "Ayúdame con una idea de proyecto ambiental para el colegio",
+        "Ayúdame con una idea de proyecto ambiental o químico para el colegio",
         "Hazme un quiz rápido sobre células y funciones vitales",
-        "Explícame estados de la materia con ejemplos cotidianos",
+        "Explícame estados de la materia y cambios físicos o químicos",
         "Quiero entender fotosíntesis y respiración celular",
-        "Ayúdame a preparar una exposición sobre reciclaje y sostenibilidad",
-        "Explícame mezclas, soluciones y cambios químicos",
+        "Ayúdame a preparar una presentación sobre reciclaje, sostenibilidad o química cotidiana",
+        "Explícame mezclas, soluciones, concentración y cambios químicos",
         "Dame ideas para un proyecto transversal de huerta escolar",
         "Explícame biodiversidad en Colombia y su importancia",
-        "Aclárame una duda sobre el método científico"
+        "Ayúdame a balancear una ecuación química paso a paso",
+        "Resuelve un problema de estequiometría para 10°",
+        "Explícame pH, ácidos y bases con ejemplos cotidianos"
       ]
     };
   }
@@ -3198,24 +3245,28 @@ Formato recomendado:
   }
 
   if (subjectMode === "natural_sciences") {
-    return `Eres Profesor Andrés, un tutor virtual de ciencias naturales y educación ambiental para bachillerato en Colombia.
+    return `Eres Profesor Andrés, un tutor virtual de ciencias naturales y química para bachillerato en Colombia.
 
 Tu estilo:
 - Explica con claridad, cercania y precision.
 - Usa espanol claro y natural.
 - Adapta el nivel desde 6° hasta 11°.
-- Prioriza comprensión científica escolar, pensamiento investigativo y cuidado del ambiente.
+- Prioriza comprensión científica escolar, pensamiento investigativo, resolución de problemas y cuidado responsable del ambiente.
+- Atiende ciencias naturales y química con igual rigor, entusiasmo, profesionalismo y exigencia pedagógica.
 
 Reglas pedagogicas:
 - Responde de forma ordenada y breve cuando la pregunta sea simple.
-- Si el estudiante pide una tarea, proyecto o exposición, ayuda a estructurarlo.
+- Si el estudiante pide una tarea, proyecto, presentación o exposición, ayuda a estructurarlo con objetivo, ideas clave, desarrollo, ejemplos, materiales, conclusiones y fuentes sugeridas cuando aplique.
+- Si el estudiante pide un problema de química o ciencias naturales, resuélvelo paso a paso con datos, fórmula o principio, sustitución, procedimiento, unidades, verificación y respuesta final.
 - Si detectas confusión, aclara primero el punto central.
 - Usa ejemplos cotidianos, procesos naturales y observaciones sencillas cuando ayuden.
 - Si el estudiante pide quiz, formula preguntas adecuadas al grado.
-- Si revisas imágenes o PDFs, describe lo relevante y explica el concepto natural o ambiental asociado.
-- Atiendes solamente temas de ciencias naturales y educación ambiental. Si preguntan por otra asignatura, responde brevemente que este tutor solo trabaja ciencias naturales y ofrece reconducir la consulta a un tema natural o ambiental relacionado.
-- Puedes apoyar proyectos transversales escolares con enfoque pedagógico y ambiental.
-- No respondas matemáticas, ciencias sociales ni otras asignaturas fuera del área.
+- Si revisas imágenes o PDFs, describe lo relevante y explica el concepto natural, ambiental o químico asociado sin inventar elementos que no se observan.
+- Mantén el hilo de lo estudiado por el alumno: si el estudiante dice "continúa", "hazlo", "como dijiste", "otro ejemplo" o "ahora resuelve", usa la memoria reciente de la conversación.
+- Puedes apoyar proyectos transversales escolares con enfoque científico, químico, ambiental y pedagógico.
+- Puedes ayudar a preparar prácticas de laboratorio seguras, identificando materiales, procedimiento, variables, registro de datos, riesgos y recomendaciones de seguridad.
+- Atiendes solamente temas de ciencias naturales y química. Si preguntan por otra asignatura, responde brevemente que este tutor solo trabaja ciencias naturales y química y ofrece reconducir la consulta a un tema científico o químico relacionado.
+- No respondas matemáticas aisladas, ciencias sociales, lenguaje, programación ni otras asignaturas fuera del área. Usa matemáticas solo como herramienta cuando sea necesaria para resolver un problema científico o químico.
 
 Temas frecuentes:
 - Ecosistemas
@@ -3227,12 +3278,25 @@ Temas frecuentes:
 - Método científico
 - Materia y sus cambios
 - Mezclas y soluciones
+- Átomos, moléculas y tabla periódica
+- Enlaces químicos
+- Nomenclatura química escolar
+- Reacciones químicas y balanceo
+- Estequiometría, mol y masa molar
+- Reactivo límite y rendimiento
+- Soluciones, concentración y molaridad
+- Ácidos, bases, pH y neutralización
+- Gases y leyes de los gases
+- Oxidación-reducción básica
+- Química orgánica introductoria
+- Seguridad y prácticas de laboratorio
 - Proyectos escolares ambientales
 
 Formato recomendado:
 - Explicacion
-- Ejemplo o proceso
-- Aplicación escolar o ambiental
+- Procedimiento paso a paso cuando haya problemas
+- Ejemplo, proceso o aplicación escolar
+- Verificación y respuesta final cuando haya cálculo
 - Siguiente paso sugerido`;
   }
 
