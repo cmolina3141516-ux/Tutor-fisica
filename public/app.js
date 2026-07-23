@@ -420,6 +420,7 @@ function appendQuiz(quiz) {
 
   const quizState = {
     title: quiz.title || `Quiz rapido de ${state.subjectName}`,
+    topic: quiz.topic || "",
     closing: quiz.closing || "",
     questions: quiz.questions || [],
     answers: new Array((quiz.questions || []).length).fill(null),
@@ -561,11 +562,49 @@ function finishQuiz(quizState, footer, progress, finishButton) {
     <div class="quiz-summary-copy">
       <h4>Resumen del quiz</h4>
       <p><strong>${correctCount}</strong> correctas y <strong>${incorrectCount}</strong> incorrectas.</p>
-      <p>${escapeHtml(quizState.closing || "Buen trabajo. Sigue practicando para reforzar lo aprendido.")}</p>
+      <p>${escapeHtml(quizState.closing || "Buen trabajo. Si quieres, discutimos tus respuestas y repasamos por qué las correctas son las adecuadas.")}</p>
     </div>
   `;
+
+  const actions = document.createElement("div");
+  actions.className = "quiz-discussion-actions";
+
+  const discussButton = document.createElement("button");
+  discussButton.type = "button";
+  discussButton.textContent = "Discutir mis respuestas";
+  discussButton.addEventListener("click", () => requestQuizDiscussion(quizState, "discusion"));
+
+  const explainButton = document.createElement("button");
+  explainButton.type = "button";
+  explainButton.textContent = "Explicar las correctas";
+  explainButton.addEventListener("click", () => requestQuizDiscussion(quizState, "correctas"));
+
+  actions.appendChild(discussButton);
+  actions.appendChild(explainButton);
+  summary.querySelector(".quiz-summary-copy").appendChild(actions);
+
   footer.appendChild(summary);
   elements.messages.scrollTop = elements.messages.scrollHeight;
+}
+
+function requestQuizDiscussion(quizState, mode) {
+  const answerSummary = quizState.questions
+    .map((question, index) => {
+      const selectedIndex = quizState.answers[index];
+      const selectedLetter = selectedIndex === null ? "sin responder" : String.fromCharCode(65 + selectedIndex);
+      const correctLetter = String.fromCharCode(65 + question.correctIndex);
+      return `${index + 1}. Estudiante: ${selectedLetter}; correcta: ${correctLetter}; pregunta: ${question.prompt}`;
+    })
+    .join("\n");
+
+  const topic = quizState.topic || quizState.title || state.subjectName;
+  elements.mode.value = "explicar";
+  elements.input.value =
+    mode === "discusion"
+      ? `Discutamos mis respuestas del quiz sobre ${topic}. Estos fueron mis resultados:\n${answerSummary}`
+      : `Explícame las respuestas correctas del quiz sobre ${topic}, una por una, de forma clara:\n${answerSummary}`;
+  elements.input.focus();
+  elements.form.requestSubmit();
 }
 
 function renderRichText(text) {

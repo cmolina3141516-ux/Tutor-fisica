@@ -827,6 +827,31 @@ textarea:focus {
   opacity: 0.95;
 }
 
+.quiz-discussion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.quiz-discussion-actions button {
+  border: 1px solid rgba(11, 111, 184, 0.22);
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: var(--accent-strong);
+  background: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(20, 35, 58, 0.08);
+}
+
+.quiz-discussion-actions button:hover,
+.quiz-discussion-actions button:focus-visible {
+  transform: translateY(-1px);
+  background: white;
+  border-color: rgba(11, 111, 184, 0.42);
+}
+
 .message .author {
   font-size: 0.8rem;
   color: var(--muted);

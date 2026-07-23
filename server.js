@@ -180,11 +180,16 @@ async function generateTutorReply(payload) {
     gradeLevel: payload.session?.grade_level,
     subjectMode: getSubjectMode()
   });
-  const isQuizMode = payload.session?.mode === "quiz";
   const latestUserTurn = getLatestUserTurn(history);
   const latestUserMessage = getLatestUserMessage(history);
   const effectiveUserMessage = resolveEffectiveUserMessage(history);
   const conversationMemory = buildConversationMemory(history);
+  const isQuizMode =
+    payload.session?.mode === "quiz" ||
+    shouldStartQuizFromMessage({
+      history,
+      message: effectiveUserMessage
+    });
   const hasLatestAttachments = hasAttachments(latestUserTurn);
   const hasLatestImageAttachment = hasImageAttachment(latestUserTurn);
   const hasLatestPdfAttachment = hasPdfAttachment(latestUserTurn);
@@ -281,8 +286,8 @@ async function generateTutorReply(payload) {
   }
 
   const systemText = isQuizMode
-    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.${buildAttachmentPriorityInstructions({
+    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opción múltiple para marcar en pantalla.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las preguntas deben ser cortas, claras y centradas en el tema conversado o solicitado.\n- Las explicaciones de cada respuesta correcta deben ser breves, útiles y aptas para discusión posterior.\n- El closing debe invitar explícitamente a discutir las respuestas y explicar las correctas, por ejemplo: \"Si quieres, discutimos tus respuestas una por una y repasamos por qué cada opción correcta es la adecuada.\"\n- Todo en espanol.`
+    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.\n- Después de explicar un tema, resolver una duda o desarrollar un ejemplo, cierra con una invitación breve y amable a hacer un quiz rápido de opción múltiple sobre ese mismo tema. No generes el quiz todavía salvo que el estudiante lo pida o acepte.${buildAttachmentPriorityInstructions({
         hasLatestAttachments,
         hasLatestImageAttachment,
         hasLatestPdfAttachment
@@ -2248,6 +2253,33 @@ function resolveEffectiveUserMessage(history) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function shouldStartQuizFromMessage({ history, message }) {
+  const normalized = normalizeText(message);
+  if (!normalized) {
+    return false;
+  }
+
+  const explicitQuizRequest =
+    /\b(quiz|quices|cuestionario|preguntas|evaluacion|prueba|test|opcion multiple|opciones multiples|seleccion multiple|marcar respuesta|marca la respuesta|preguntas rapidas)\b/.test(
+      normalized
+    ) &&
+    /\b(haz|hazme|genera|crea|dame|quiero|puedes|prepara|inicia|empezar|rapido|corto|cortas)\b/.test(normalized);
+
+  if (explicitQuizRequest) {
+    return true;
+  }
+
+  const lastAssistantMessage = normalizeText(getLatestAssistantMessage(history));
+  const assistantSuggestedQuiz =
+    /\b(quiz|cuestionario|preguntas|opcion multiple|opciones multiples|preguntas rapidas)\b/.test(lastAssistantMessage);
+  const acceptedSuggestion =
+    /^(si|sí|dale|hazlo|hagamoslo|hagámoslo|claro|ok|listo|de una|perfecto|por favor|adelante|inicia|empecemos)(\b|[.!?])/.test(
+      normalized
+    );
+
+  return assistantSuggestedQuiz && acceptedSuggestion;
 }
 
 function buildGradeAdaptationProfile(gradeLevel) {
