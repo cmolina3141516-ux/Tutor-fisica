@@ -176,6 +176,10 @@ async function generateTutorReply(payload) {
   const systemPrompt = loadSystemPrompt();
   const history = Array.isArray(payload.messages) ? payload.messages : [];
   const studentContext = buildStudentContext(payload.session || {});
+  const gradeAdaptationInstructions = buildGradeAdaptationInstructions({
+    gradeLevel: payload.session?.grade_level,
+    subjectMode: getSubjectMode()
+  });
   const isQuizMode = payload.session?.mode === "quiz";
   const latestUserTurn = getLatestUserTurn(history);
   const latestUserMessage = getLatestUserMessage(history);
@@ -262,7 +266,8 @@ async function generateTutorReply(payload) {
     const subjectVisual = await generateSubjectVisualImage({
       apiKey,
       subjectMode,
-      prompt: effectiveUserMessage || "Genera una imagen educativa."
+      prompt: effectiveUserMessage || "Genera una imagen educativa.",
+      gradeLevel: payload.session?.grade_level
     });
     if (subjectVisual) {
       return subjectVisual;
@@ -276,8 +281,8 @@ async function generateTutorReply(payload) {
   }
 
   const systemText = isQuizMode
-    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.${buildAttachmentPriorityInstructions({
+    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opcion multiple.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las explicaciones deben ser breves y claras.\n- El closing debe motivar a seguir estudiando.\n- Todo en espanol.`
+    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.${buildAttachmentPriorityInstructions({
         hasLatestAttachments,
         hasLatestImageAttachment,
         hasLatestPdfAttachment
@@ -404,9 +409,9 @@ function extractGeneratedImages(data) {
   return images;
 }
 
-async function generateSubjectVisualImage({ apiKey, subjectMode, prompt }) {
+async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLevel }) {
   const subjectLabel = getSubjectLabel(subjectMode);
-  const visualPrompt = buildSubjectImagePrompt({ subjectMode, prompt });
+  const visualPrompt = buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel });
 
   try {
     const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -465,9 +470,10 @@ function getSubjectLabel(subjectMode) {
         : "Física";
 }
 
-function buildSubjectImagePrompt({ subjectMode, prompt }) {
+function buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel }) {
   const cleanedPrompt = String(prompt || "Genera una imagen educativa.").trim();
   const subjectLabel = getSubjectLabel(subjectMode);
+  const gradeProfile = buildGradeAdaptationProfile(gradeLevel);
   const style =
     subjectMode === "social_studies"
       ? "Infografía escolar o diagrama histórico-social claro, neutral, riguroso, sin propaganda, sin hechos inventados, con composición tipo libro de texto."
@@ -480,10 +486,13 @@ function buildSubjectImagePrompt({ subjectMode, prompt }) {
   return [
     `Crea una imagen educativa para la asignatura de ${subjectLabel}.`,
     style,
+    `Nivel escolar: grado ${gradeProfile.gradeLabel}.`,
+    `Ajuste pedagogico visual: ${gradeProfile.visualGuidance}`,
     "Debe ser visualmente clara, útil para estudiantes, con fondo limpio y composición profesional.",
     "No generes una fotografía periodística ni una escena hiperrealista dudosa.",
     "No inventes hechos, fechas, datos o elementos que no estén implicados en la solicitud.",
     "Si la solicitud describe un proceso, representa el proceso con flechas, etiquetas y elementos didácticos.",
+    "Incluye solo textos cortos, legibles y adecuados al grado. Evita saturar la imagen.",
     `Solicitud del estudiante: ${cleanedPrompt}`
   ].join(" ");
 }
@@ -2239,6 +2248,90 @@ function resolveEffectiveUserMessage(history) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function buildGradeAdaptationProfile(gradeLevel) {
+  const gradeNumber = Number.parseInt(String(gradeLevel || ""), 10);
+  const safeGrade = Number.isInteger(gradeNumber) ? gradeNumber : null;
+
+  if (safeGrade !== null && safeGrade <= 7) {
+    return {
+      gradeLabel: `${safeGrade}°`,
+      explanationGuidance:
+        "usa lenguaje cercano, analogías cotidianas, pocas variables a la vez, pasos cortos y una comprobación sencilla.",
+      visualGuidance:
+        "imagen muy clara, colorida y guiada, con pocos elementos, flechas grandes, etiquetas simples y una secuencia facil de seguir.",
+      projectGuidance:
+        "propón proyectos observables, seguros y de baja complejidad, con materiales cotidianos, roles simples y producto final concreto.",
+      resourceGuidance:
+        "sugiere videos cortos, simulaciones simples, lecturas introductorias y enlaces seguros con una frase sobre para qué sirve cada recurso.",
+      codeGuidance:
+        "si se pide código, entrégalo como una demostración simple, con pocas líneas y explicación de qué puede modificar el estudiante."
+    };
+  }
+
+  if (safeGrade !== null && safeGrade <= 9) {
+    return {
+      gradeLabel: `${safeGrade}°`,
+      explanationGuidance:
+        "combina intuición con vocabulario escolar formal, usa ejemplos guiados, tablas simples, relaciones causa-efecto y verificación conceptual.",
+      visualGuidance:
+        "imagen con etiquetas precisas, pasos numerados, relaciones entre variables y una composición limpia sin exceso de información.",
+      projectGuidance:
+        "propón proyectos con pregunta orientadora, hipótesis simple, variables, registro de datos y conclusión escolar.",
+      resourceGuidance:
+        "sugiere videos, simulaciones y enlaces de práctica; explica el orden recomendado para usarlos y qué debe observar el estudiante.",
+      codeGuidance:
+        "si se pide código, entrega una simulación o herramienta sencilla con comentarios breves y parámetros editables."
+    };
+  }
+
+  if (safeGrade !== null && safeGrade >= 10) {
+    return {
+      gradeLabel: `${safeGrade}°`,
+      explanationGuidance:
+        "usa rigor de bachillerato, fórmulas cuando aporten, análisis de unidades, supuestos, límites del modelo y conexión conceptual.",
+      visualGuidance:
+        "imagen detallada y rigurosa, con variables, escalas o etapas relevantes, etiquetas técnicas legibles y relaciones entre procesos o magnitudes.",
+      projectGuidance:
+        "propón proyectos con problema, marco conceptual breve, hipótesis, variables, metodología, análisis de datos, posibles fuentes y producto final.",
+      resourceGuidance:
+        "sugiere recursos más profundos, simuladores, lecturas o fuentes institucionales; incluye URLs activas cuando sean pertinentes y aclara qué verificar.",
+      codeGuidance:
+        "si se pide código, entrega una simulación, calculadora o visualización con estructura limpia, parámetros editables y explicación técnica breve."
+    };
+  }
+
+  return {
+    gradeLabel: "bachillerato",
+    explanationGuidance:
+      "ajusta la profundidad al contexto disponible, empieza claro y aumenta rigor si el estudiante lo pide.",
+    visualGuidance:
+      "imagen educativa clara, con etiquetas legibles, nivel escolar medio y sin detalles innecesarios.",
+    projectGuidance:
+      "propón proyectos escolares seguros, con objetivo, materiales, procedimiento, evidencias y cierre.",
+    resourceGuidance:
+      "sugiere recursos confiables y explica brevemente cómo usarlos.",
+    codeGuidance:
+      "si se pide código, entrégalo como apoyo educativo del tema, no como contenido aislado de programación."
+  };
+}
+
+function buildGradeAdaptationInstructions({ gradeLevel, subjectMode }) {
+  const profile = buildGradeAdaptationProfile(gradeLevel);
+  const subjectLabel = getSubjectLabel(subjectMode);
+
+  return [
+    "Regla transversal de adaptación por grado:",
+    `- Área activa: ${subjectLabel}. Nivel objetivo: ${profile.gradeLabel}.`,
+    `- Explicaciones: ${profile.explanationGuidance}`,
+    `- Imágenes y diagramas: genéralos solo cuando el estudiante los pida explícitamente. Si los pide, aplica este criterio: ${profile.visualGuidance}`,
+    `- Proyectos transversales: ${profile.projectGuidance}`,
+    `- Recursos, videos, enlaces y URLs: ${profile.resourceGuidance}`,
+    `- Código educativo o simulaciones: ${profile.codeGuidance}`,
+    "- Mantén el contenido dentro del área del tutor. Si usas matemáticas, código o recursos externos, hazlo solo como herramienta de apoyo al tema del área.",
+    "- No sobrecargues la respuesta: entrega lo necesario para avanzar y ofrece ampliar si el estudiante lo solicita."
+  ].join("\n");
 }
 
 function buildStudentContext(session) {
