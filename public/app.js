@@ -1242,6 +1242,17 @@ function renderImageGallery(images) {
 
     figure.appendChild(img);
 
+    const actions = document.createElement("div");
+    actions.className = "message-image-actions";
+
+    const downloadButton = document.createElement("button");
+    downloadButton.type = "button";
+    downloadButton.className = "image-download-button";
+    downloadButton.textContent = "Descargar imagen";
+    downloadButton.addEventListener("click", () => downloadGeneratedImage(image));
+    actions.appendChild(downloadButton);
+    figure.appendChild(actions);
+
     if (image.caption) {
       const caption = document.createElement("figcaption");
       caption.textContent = image.caption;
@@ -1252,6 +1263,55 @@ function renderImageGallery(images) {
   });
 
   return gallery;
+}
+
+async function downloadGeneratedImage(image) {
+  const src = String(image?.src || "");
+  if (!src) {
+    return;
+  }
+
+  const filename = buildImageDownloadName(image);
+  try {
+    const response = await fetch(src);
+    if (!response.ok) {
+      throw new Error("No se pudo descargar la imagen.");
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    triggerImageDownload(objectUrl, filename);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (_error) {
+    // Fallback for remote images that block fetch from the browser.
+    triggerImageDownload(src, filename);
+  }
+}
+
+function triggerImageDownload(src, filename) {
+  const link = document.createElement("a");
+  link.href = src;
+  link.download = filename;
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function buildImageDownloadName(image) {
+  const label = String(image?.alt || "imagen-educativa")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 55) || "imagen-educativa";
+  const source = String(image?.src || "");
+  const extension = source.startsWith("data:image/svg") || source.includes("/api/math-graph")
+    ? "svg"
+    : "png";
+  return `${label}.${extension}`;
 }
 
 function normalizeImages(images, text) {
