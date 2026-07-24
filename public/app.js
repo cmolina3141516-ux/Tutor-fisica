@@ -1514,7 +1514,7 @@ function setupSpeechRecognition() {
   }
 
   const recognition = new Recognition();
-  recognition.lang = "es-CO";
+  recognition.lang = getDefaultRecognitionLanguage();
   recognition.interimResults = true;
   recognition.continuous = false;
 
@@ -1600,7 +1600,7 @@ function speakText(text, onEnd) {
 
   const voices = window.speechSynthesis.getVoices();
   const preferredVoice =
-    voices.find((voice) => voice.name === state.selectedVoiceName) ||
+    getCompatibleSelectedVoice(voices, speechLang) ||
     pickPreferredVoice(voices, speechLang);
   if (preferredVoice) {
     utterance.voice = preferredVoice;
@@ -1651,11 +1651,28 @@ function populateVoiceOptions() {
     option.textContent = `${voice.name} (${voice.lang})`;
     elements.voiceSelect.appendChild(option);
   });
+
+  if (!state.selectedVoiceName && state.voicePreference === "female") {
+    const defaultLang = state.subjectMode === "languages" ? "en-US" : "es-CO";
+    const preferred = pickPreferredVoice(voices, defaultLang);
+    if (preferred) {
+      state.selectedVoiceName = preferred.name;
+      elements.voiceSelect.value = preferred.name;
+    }
+  }
 }
 
 function isAllowedVoiceLanguage(voice) {
   const lang = voice.lang.toLowerCase();
   return state.voiceLanguages.some((prefix) => lang.startsWith(prefix.toLowerCase()));
+}
+
+function getDefaultRecognitionLanguage() {
+  if (state.subjectMode === "languages") {
+    return "en-US";
+  }
+
+  return "es-CO";
 }
 
 function detectSpeechLanguage(text) {
@@ -1680,7 +1697,15 @@ function detectSpeechLanguage(text) {
     "être",
     "avoir",
     "passé composé",
-    "français"
+    "français",
+    "francais",
+    "je suis",
+    "j ai",
+    "c est",
+    "qu est-ce",
+    "parlez",
+    "comprends",
+    "french"
   ]);
   const englishScore = countMatches(normalized, [
     "hello",
@@ -1694,24 +1719,60 @@ function detectSpeechLanguage(text) {
     "present simple",
     "past simple",
     "pronunciation",
-    "english"
+    "english",
+    "i am",
+    "i can",
+    "you are",
+    "we are",
+    "this is",
+    "that is",
+    "with",
+    "without",
+    "practice",
+    "sentence",
+    "example",
+    "question",
+    "answer"
+  ]);
+  const spanishSupportScore = countMatches(normalized, [
+    "en espanol",
+    "en español",
+    "explicame en espanol",
+    "explicame en español",
+    "respondeme en espanol",
+    "respondeme en español"
   ]);
 
   if (frenchScore > englishScore && frenchScore > 0) {
     return "fr-FR";
   }
-  if (englishScore > 0) {
+  if (englishScore > 0 || spanishSupportScore === 0) {
     return "en-US";
   }
 
   return "es-CO";
 }
 
+function getCompatibleSelectedVoice(voices, speechLang) {
+  if (!state.selectedVoiceName) {
+    return null;
+  }
+
+  const selected = voices.find((voice) => voice.name === state.selectedVoiceName);
+  if (!selected || !isVoiceCompatibleWithLanguage(selected, speechLang)) {
+    return null;
+  }
+
+  return selected;
+}
+
 function pickPreferredVoice(voices, speechLang) {
   const langPrefix = speechLang.slice(0, 2).toLowerCase();
   const candidates = voices.filter((voice) => voice.lang.toLowerCase().startsWith(langPrefix));
   if (!candidates.length) {
-    return voices.find((voice) => voice.lang.toLowerCase().startsWith("es"));
+    return speechLang.toLowerCase().startsWith("es")
+      ? voices.find((voice) => voice.lang.toLowerCase().startsWith("es"))
+      : null;
   }
 
   if (state.voicePreference === "female") {
@@ -1724,18 +1785,47 @@ function pickPreferredVoice(voices, speechLang) {
   return candidates[0];
 }
 
+function isVoiceCompatibleWithLanguage(voice, speechLang) {
+  return voice.lang.toLowerCase().startsWith(speechLang.slice(0, 2).toLowerCase());
+}
+
 function isLikelyFemaleVoice(name) {
   const normalized = normalizeForVoice(name);
   return [
+    "female",
+    "woman",
     "sabina",
     "helena",
     "laura",
     "elvira",
     "zira",
     "aria",
+    "ana",
+    "andrea",
+    "ava",
+    "emma",
+    "libby",
+    "mia",
+    "natasha",
+    "sonia",
+    "olivia",
+    "samantha",
+    "tessa",
+    "victoria",
     "jenny",
+    "joanna",
+    "kendra",
+    "kimberly",
+    "salli",
     "susan",
     "denise",
+    "gabrielle",
+    "lea",
+    "celine",
+    "chloe",
+    "aurelie",
+    "audrey",
+    "brigitte",
     "hortense",
     "julie",
     "amelie",
