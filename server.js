@@ -283,14 +283,22 @@ async function generateTutorReply(payload) {
       })
     };
   }
+  const acceptedVisualSuggestion = hasAcceptedVisualSuggestion({
+    history,
+    message: effectiveUserMessage
+  });
+  const visualRequestMessage = acceptedVisualSuggestion
+    ? resolveVisualRequestFromHistory(history, effectiveUserMessage)
+    : effectiveUserMessage;
   const mathGraphEnabled = subjectMode === "mathematics" || hybridPhysicsMathTutor;
   const mathGraphRequested =
-    mathGraphEnabled && isMathGraphRequest(effectiveUserMessage);
+    mathGraphEnabled && isMathGraphRequest(visualRequestMessage);
   const wantsImage =
     Boolean(payload.generate_image) ||
-    shouldGenerateImage(effectiveUserMessage) ||
-    mathGraphRequested;
-  const mathDiagram = mathGraphEnabled ? tryGenerateMathDiagram(effectiveUserMessage) : null;
+    shouldGenerateImage(visualRequestMessage) ||
+    mathGraphRequested ||
+    acceptedVisualSuggestion;
+  const mathDiagram = mathGraphEnabled ? tryGenerateMathDiagram(visualRequestMessage) : null;
   if (mathDiagram && !isQuizMode) {
     return mathDiagram;
   }
@@ -303,7 +311,7 @@ async function generateTutorReply(payload) {
     const inferredMathDiagram = await inferMathDiagramFromLatestImage({
       apiKey,
       latestUserTurn,
-      userMessage: effectiveUserMessage || latestUserMessage
+      userMessage: visualRequestMessage || latestUserMessage
     });
     if (inferredMathDiagram) {
       return inferredMathDiagram;
@@ -312,7 +320,7 @@ async function generateTutorReply(payload) {
   if (mathGraphEnabled && (wantsImage || mathGraphRequested) && !isQuizMode) {
     const universalMathDiagram = await tryGenerateUniversalMathGraphAnswer({
       apiKey,
-      prompt: effectiveUserMessage || latestUserMessage
+      prompt: visualRequestMessage || latestUserMessage
     });
     if (universalMathDiagram) {
       return universalMathDiagram;
@@ -322,7 +330,7 @@ async function generateTutorReply(payload) {
     const subjectVisual = await generateSubjectVisualImage({
       apiKey,
       subjectMode,
-      prompt: effectiveUserMessage || "Genera una imagen educativa.",
+      prompt: visualRequestMessage || "Genera una imagen educativa.",
       gradeLevel: payload.session?.grade_level
     });
     if (subjectVisual) {
@@ -332,7 +340,7 @@ async function generateTutorReply(payload) {
   if (wantsImage && !isQuizMode && !hasLatestAttachments) {
     return buildVerifiedImageOnlyReply({
       subjectMode,
-      prompt: effectiveUserMessage || "Genera una imagen educativa."
+      prompt: visualRequestMessage || "Genera una imagen educativa."
     });
   }
 
@@ -394,7 +402,7 @@ async function generateTutorReply(payload) {
 
   const data = await response.json();
   const reply = extractOutputText(data);
-  const images = extractGeneratedImages(data);
+  const images = dedupeGeneratedImages(extractGeneratedImages(data));
   if (!reply) {
     if (images.length) {
       return {
@@ -414,9 +422,17 @@ async function generateTutorReply(payload) {
     };
   }
 
+  const safeReply =
+    !images.length && containsImagePromise(reply)
+      ? buildVerifiedImageOnlyReply({
+          subjectMode,
+          prompt: effectiveUserMessage || "Genera una imagen educativa."
+        }).reply
+      : reply;
+
   return {
     type: images.length ? "image" : "text",
-    reply,
+    reply: safeReply,
     images
   };
 }
@@ -463,6 +479,29 @@ function extractGeneratedImages(data) {
   }
 
   return images;
+}
+
+function dedupeGeneratedImages(images) {
+  const seen = new Set();
+  return (Array.isArray(images) ? images : []).filter((image) => {
+    const src = String(image?.src || "");
+    if (!src || seen.has(src)) {
+      return false;
+    }
+    seen.add(src);
+    return true;
+  });
+}
+
+function containsImagePromise(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  return /\b(adjunto|adjunta|aqui tienes|aquí tienes|te envio|te envío|envio el|envío el|png|jpg|imagen generada|grafica solicitada|gráfica solicitada)\b/.test(
+    normalized
+  );
 }
 
 async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLevel }) {
@@ -2303,6 +2342,38 @@ function resolveEffectiveUserMessage(history) {
     `Contexto inmediato de la conversación: ${lastAssistantMessage}`,
     previousUserMessage ? `Pedido anterior del estudiante: ${previousUserMessage}` : "",
     `Nueva instrucción del estudiante: ${latestUserMessage}`
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function hasAcceptedVisualSuggestion({ history, message }) {
+  const normalized = normalizeText(message);
+  if (!normalized || !getLatestAssistantMessage(history)) {
+    return false;
+  }
+
+  const accepted = /^(si|sí|dale|hazlo|hagamoslo|hagámoslo|claro|ok|listo|de una|perfecto|por favor|adelante|inicia|empecemos)(\b|[.!?])/.test(
+    normalized
+  );
+  if (!accepted) {
+    return false;
+  }
+
+  const previousAssistant = normalizeText(getLatestAssistantMessage(history));
+  return /\b(imagen|imagenes|foto|diagrama|esquema|grafica|gráfica|png|jpg|dibuja|dibujar|curva|ilustracion|ilustración)\b/.test(
+    previousAssistant
+  );
+}
+
+function resolveVisualRequestFromHistory(history, confirmation) {
+  const previousUserMessage = getPreviousUserMessage(history);
+  const previousAssistantMessage = getLatestAssistantMessage(history);
+
+  return [
+    previousUserMessage ? `Solicitud visual original: ${previousUserMessage}` : "",
+    previousAssistantMessage ? `Propuesta visual confirmada: ${previousAssistantMessage}` : "",
+    `Confirmación del estudiante: ${confirmation}`
   ]
     .filter(Boolean)
     .join("\n");

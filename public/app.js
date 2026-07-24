@@ -1255,7 +1255,15 @@ function renderImageGallery(images) {
 }
 
 function normalizeImages(images, text) {
-  return Array.isArray(images) ? images.filter((image) => image && image.src) : [];
+  const seen = new Set();
+  return (Array.isArray(images) ? images : []).filter((image) => {
+    const src = String(image?.src || "");
+    if (!src || seen.has(src)) {
+      return false;
+    }
+    seen.add(src);
+    return true;
+  });
 }
 
 function normalizeUserAttachments(attachments) {
