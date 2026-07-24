@@ -423,10 +423,10 @@ async function generateTutorReply(payload) {
   }
 
   const safeReply =
-    !images.length && containsImagePromise(reply)
+    !images.length && (wantsImage || containsImagePromise(reply))
       ? buildVerifiedImageOnlyReply({
           subjectMode,
-          prompt: effectiveUserMessage || "Genera una imagen educativa."
+          prompt: visualRequestMessage || "Genera una imagen educativa."
         }).reply
       : reply;
 
@@ -2353,7 +2353,7 @@ function hasAcceptedVisualSuggestion({ history, message }) {
     return false;
   }
 
-  const accepted = /^(si|sí|dale|hazlo|hagamoslo|hagámoslo|claro|ok|listo|de una|perfecto|por favor|adelante|inicia|empecemos)(\b|[.!?])/.test(
+  const accepted = /^(si|sí)\b(?!\s*(no|pero no|todavia no|todavía no))|^(dale|hazlo|hagamoslo|hagámoslo|claro|ok|listo|de una|perfecto|por favor|adelante|inicia|empecemos)\b/.test(
     normalized
   );
   if (!accepted) {
