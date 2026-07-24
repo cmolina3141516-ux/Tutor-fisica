@@ -18,6 +18,7 @@ const state = {
   selectedVoiceName: "",
   voicePreference: "neutral",
   voiceLanguages: ["es"],
+  speechRecognitionLanguage: "es-CO",
   subjectMode: "physics",
   shouldSubmitAfterRecognition: false,
   voicePaused: false,
@@ -26,7 +27,9 @@ const state = {
   sessionStartedAt: Date.now(),
   sessionTimerId: null,
   sessionWarned: false,
-  avatarClosed: false
+  avatarClosed: false,
+  lastAttachmentBatchSignature: "",
+  lastAttachmentBatchAt: 0
 };
 
 const elements = {
@@ -64,7 +67,13 @@ const elements = {
   pasteImageButton: document.getElementById("pasteImageButton"),
   listenButton: document.getElementById("listenButton"),
   autoSpeakToggle: document.getElementById("autoSpeakToggle"),
+  autoSpeakLabel: document.getElementById("autoSpeakLabel"),
   voiceSelect: document.getElementById("voiceSelect"),
+  voiceSelectLabel: document.getElementById("voiceSelectLabel"),
+  defaultVoiceOption: document.getElementById("defaultVoiceOption"),
+  speechLanguageWrap: document.getElementById("speechLanguageWrap"),
+  speechLanguageLabel: document.getElementById("speechLanguageLabel"),
+  speechLanguageSelect: document.getElementById("speechLanguageSelect"),
   voiceStatus: document.getElementById("voiceStatus"),
   voiceStatusText: document.getElementById("voiceStatusText"),
   attachButton: document.getElementById("attachButton"),
@@ -136,6 +145,14 @@ elements.autoSpeakToggle.addEventListener("change", () => {
 
 elements.voiceSelect.addEventListener("change", () => {
   state.selectedVoiceName = elements.voiceSelect.value;
+});
+
+elements.speechLanguageSelect?.addEventListener("change", () => {
+  state.speechRecognitionLanguage = elements.speechLanguageSelect.value;
+  if (state.recognition) {
+    state.recognition.lang = state.speechRecognitionLanguage;
+  }
+  setVoiceStatus(getVoiceReadyLabel(), state.handsFree ? "active" : "idle");
 });
 
 window.addEventListener("pagehide", () => {
@@ -212,6 +229,7 @@ async function bootstrap() {
   state.voiceLanguages = Array.isArray(config.voiceLanguages) && config.voiceLanguages.length
     ? config.voiceLanguages
     : state.voiceLanguages;
+  state.speechRecognitionLanguage = getDefaultRecognitionLanguage();
 
   document.title = config.pageTitle || "Tutor IA Embebible";
   elements.heroEyebrow.textContent = config.heroEyebrow || `Tutor IA de ${state.subjectName}`;
@@ -233,6 +251,8 @@ async function bootstrap() {
   if (helper && config.helperText) {
     helper.textContent = config.helperText;
   }
+  updateSpeechLanguageControls();
+  updateVoiceControlLabels();
 
   const prompts = Array.isArray(config.suggestedPrompts) ? config.suggestedPrompts : [];
   for (const prompt of prompts) {
@@ -1381,14 +1401,63 @@ function renderPendingAttachments() {
 async function handleIncomingFiles(files) {
   setBusy(true, "Procesando adjuntos...");
   try {
-    const attachments = await Promise.all(files.map(readAttachment));
-    state.pendingAttachments = [...state.pendingAttachments, ...attachments];
+    const attachments = dedupeAttachments(await Promise.all(files.map(readAttachment)));
+    const batchSignature = attachments.map(getAttachmentFingerprint).join("|");
+    const now = Date.now();
+    if (
+      batchSignature &&
+      batchSignature === state.lastAttachmentBatchSignature &&
+      now - state.lastAttachmentBatchAt < 1500
+    ) {
+      setBusy(false, "Adjunto ya agregado");
+      return;
+    }
+
+    const existing = new Set(state.pendingAttachments.map(getAttachmentFingerprint));
+    const nextAttachments = [...state.pendingAttachments];
+    let addedCount = 0;
+    for (const attachment of attachments) {
+      const fingerprint = getAttachmentFingerprint(attachment);
+      if (!existing.has(fingerprint)) {
+        existing.add(fingerprint);
+        nextAttachments.push(attachment);
+        addedCount += 1;
+      }
+    }
+
+    state.lastAttachmentBatchSignature = batchSignature;
+    state.lastAttachmentBatchAt = now;
+    state.pendingAttachments = nextAttachments;
     renderPendingAttachments();
-    setBusy(false, "Listo");
+    setBusy(false, addedCount ? "Listo" : "Adjunto ya agregado");
   } catch (error) {
     appendMessage("assistant", `No pude cargar los adjuntos: ${error.message}`);
     setBusy(false, "Error");
   }
+}
+
+function dedupeAttachments(attachments) {
+  const seen = new Set();
+  const unique = [];
+  for (const attachment of attachments) {
+    const fingerprint = getAttachmentFingerprint(attachment);
+    if (!seen.has(fingerprint)) {
+      seen.add(fingerprint);
+      unique.push(attachment);
+    }
+  }
+
+  return unique;
+}
+
+function getAttachmentFingerprint(attachment) {
+  const dataUrl = String(attachment?.dataUrl || "");
+  return [
+    attachment?.mimeType || "",
+    dataUrl.length,
+    dataUrl.slice(0, 160),
+    dataUrl.slice(-160)
+  ].join(":");
 }
 
 function extractImageFilesFromPasteEvent(event) {
@@ -1514,14 +1583,14 @@ function setupSpeechRecognition() {
   }
 
   const recognition = new Recognition();
-  recognition.lang = getDefaultRecognitionLanguage();
+  recognition.lang = state.speechRecognitionLanguage || getDefaultRecognitionLanguage();
   recognition.interimResults = true;
   recognition.continuous = false;
 
   recognition.onstart = () => {
     state.isRecording = true;
     updateVoiceUi();
-    setVoiceStatus("Escuchando...", "recording");
+    setVoiceStatus(getListeningLabel(), "recording");
   };
 
   recognition.onresult = (event) => {
@@ -1544,21 +1613,21 @@ function setupSpeechRecognition() {
     state.isRecording = false;
     if (state.handsFree) {
       updateVoiceUi();
-      setVoiceStatus("Manos libres activo", "active");
+      setVoiceStatus(getVoiceReadyLabel(), "active");
       if (state.shouldSubmitAfterRecognition) {
         state.shouldSubmitAfterRecognition = false;
         submitVoiceTranscript();
       }
     } else {
       updateVoiceUi();
-      setVoiceStatus("Voz lista", "idle");
+      setVoiceStatus(getVoiceReadyLabel(), "idle");
     }
   };
 
   recognition.onerror = () => {
     state.isRecording = false;
     updateVoiceUi();
-    setVoiceStatus("No pude escuchar bien. Intenta de nuevo.", "idle");
+    setVoiceStatus(getVoiceErrorLabel(), "idle");
   };
 
   state.recognition = recognition;
@@ -1591,7 +1660,7 @@ function speakText(text, onEnd) {
   window.speechSynthesis.cancel();
   state.isSpeaking = true;
   updateVoiceUi();
-  setVoiceStatus("Leyendo respuesta...", "speaking");
+  setVoiceStatus(getSpeakingLabel(), "speaking");
   const utterance = new SpeechSynthesisUtterance(cleanTextForSpeech(text));
   const speechLang = detectSpeechLanguage(text);
   utterance.lang = speechLang;
@@ -1617,9 +1686,9 @@ function speakText(text, onEnd) {
       state.isSpeaking = false;
       updateVoiceUi();
       if (state.handsFree) {
-        setVoiceStatus("Manos libres activo", "active");
+        setVoiceStatus(getVoiceReadyLabel(), "active");
       } else {
-        setVoiceStatus("Voz lista", "idle");
+        setVoiceStatus(getVoiceReadyLabel(), "idle");
       }
     };
   }
@@ -1644,7 +1713,7 @@ function populateVoiceOptions() {
     .getVoices()
     .filter((voice) => isAllowedVoiceLanguage(voice));
 
-  elements.voiceSelect.innerHTML = '<option value="">Voz del sistema</option>';
+  elements.voiceSelect.innerHTML = `<option id="defaultVoiceOption" value="">${getDefaultVoiceOptionLabel()}</option>`;
   voices.forEach((voice) => {
     const option = document.createElement("option");
     option.value = voice.name;
@@ -1673,6 +1742,80 @@ function getDefaultRecognitionLanguage() {
   }
 
   return "es-CO";
+}
+
+function updateSpeechLanguageControls() {
+  if (!elements.speechLanguageWrap || !elements.speechLanguageSelect) {
+    return;
+  }
+
+  const isLanguageTutor = state.subjectMode === "languages";
+  elements.speechLanguageWrap.hidden = !isLanguageTutor;
+  elements.speechLanguageSelect.value = state.speechRecognitionLanguage;
+  if (elements.speechLanguageLabel) {
+    elements.speechLanguageLabel.textContent = isLanguageTutor ? "Listen in" : "Escuchar";
+  }
+}
+
+function updateVoiceControlLabels() {
+  const isLanguageTutor = state.subjectMode === "languages";
+  if (elements.autoSpeakLabel) {
+    elements.autoSpeakLabel.textContent = isLanguageTutor ? "Read answers aloud" : "Lectura automática";
+  }
+  if (elements.voiceSelectLabel) {
+    elements.voiceSelectLabel.textContent = isLanguageTutor ? "Voice" : "Voz";
+  }
+  if (elements.defaultVoiceOption) {
+    elements.defaultVoiceOption.textContent = getDefaultVoiceOptionLabel();
+  }
+}
+
+function getDefaultVoiceOptionLabel() {
+  return state.subjectMode === "languages" ? "System voice" : "Voz del sistema";
+}
+
+function getListeningLabel() {
+  if (state.subjectMode !== "languages") {
+    return "Escuchando...";
+  }
+
+  return `Listening in ${getRecognitionLanguageLabel()}...`;
+}
+
+function getVoiceReadyLabel() {
+  if (state.subjectMode !== "languages") {
+    return state.handsFree ? "Manos libres activo" : "Voz lista";
+  }
+
+  return state.handsFree
+    ? `Hands-free active · ${getRecognitionLanguageLabel()}`
+    : `Voice ready · ${getRecognitionLanguageLabel()}`;
+}
+
+function getVoiceErrorLabel() {
+  if (state.subjectMode !== "languages") {
+    return "No pude escuchar bien. Intenta de nuevo.";
+  }
+
+  return `I could not hear clearly in ${getRecognitionLanguageLabel()}. Try again a little closer to the microphone.`;
+}
+
+function getSpeakingLabel() {
+  if (state.subjectMode !== "languages") {
+    return "Leyendo respuesta...";
+  }
+
+  return "Reading the answer...";
+}
+
+function getRecognitionLanguageLabel() {
+  const labels = {
+    "en-US": "English",
+    "fr-FR": "French",
+    "es-CO": "Spanish"
+  };
+
+  return labels[state.speechRecognitionLanguage] || "English";
 }
 
 function detectSpeechLanguage(text) {
@@ -1854,6 +1997,7 @@ function startRecognition() {
     return;
   }
   try {
+    state.recognition.lang = state.speechRecognitionLanguage || getDefaultRecognitionLanguage();
     state.recognition.start();
   } catch (error) {
     // Ignora llamadas duplicadas de algunos navegadores.
@@ -1871,13 +2015,13 @@ function toggleHandsFree() {
     if (state.isRecording) {
       state.recognition.stop();
     }
-    setVoiceStatus("Manos libres pausado", "idle");
+    setVoiceStatus(state.subjectMode === "languages" ? "Hands-free paused" : "Manos libres pausado", "idle");
     return;
   }
 
   state.voicePaused = false;
   updateVoiceUi();
-  setVoiceStatus("Manos libres activo", "active");
+  setVoiceStatus(getVoiceReadyLabel(), "active");
   startRecognition();
 }
 
@@ -1908,25 +2052,46 @@ function toggleVoicePause() {
     }
     state.isSpeaking = false;
     updateVoiceUi();
-    setVoiceStatus("Voz pausada", "paused");
+    setVoiceStatus(state.subjectMode === "languages" ? "Voice paused" : "Voz pausada", "paused");
     return;
   }
 
   updateVoiceUi();
-  setVoiceStatus(state.handsFree ? "Manos libres activo" : "Voz lista", state.handsFree ? "active" : "idle");
+  setVoiceStatus(getVoiceReadyLabel(), state.handsFree ? "active" : "idle");
   if (state.handsFree) {
     startRecognition();
   }
 }
 
 function updateVoiceUi() {
-  elements.voiceButtonLabel.textContent = state.isRecording ? "Escuchando..." : "Hablar";
+  elements.voiceButtonLabel.textContent =
+    state.subjectMode === "languages"
+      ? state.isRecording
+        ? "Listening..."
+        : "Speak"
+      : state.isRecording
+        ? "Escuchando..."
+        : "Hablar";
   elements.voiceButton.classList.toggle("is-recording", state.isRecording);
 
-  elements.handsFreeButtonLabel.textContent = state.handsFree ? "Manos libres activo" : "Modo manos libres";
+  elements.handsFreeButtonLabel.textContent =
+    state.subjectMode === "languages"
+      ? state.handsFree
+        ? "Hands-free active"
+        : "Hands-free mode"
+      : state.handsFree
+        ? "Manos libres activo"
+        : "Modo manos libres";
   elements.handsFreeButton.classList.toggle("is-recording", state.handsFree || state.isRecording);
 
-  elements.pauseVoiceButtonLabel.textContent = state.voicePaused ? "Reanudar voz" : "Pausar voz";
+  elements.pauseVoiceButtonLabel.textContent =
+    state.subjectMode === "languages"
+      ? state.voicePaused
+        ? "Resume voice"
+        : "Pause voice"
+      : state.voicePaused
+        ? "Reanudar voz"
+        : "Pausar voz";
   elements.pauseVoiceButton.classList.toggle("is-paused", state.voicePaused);
   elements.pauseVoiceButton.classList.toggle("is-recording", state.isSpeaking);
 }

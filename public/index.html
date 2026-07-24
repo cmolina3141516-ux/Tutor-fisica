@@ -186,12 +186,20 @@
             <div class="voice-controls">
               <label class="voice-toggle">
                 <input id="autoSpeakToggle" type="checkbox" checked />
-                <span>Lectura automática</span>
+                <span id="autoSpeakLabel">Lectura automática</span>
               </label>
               <label class="voice-select-wrap">
-                <span>Voz</span>
+                <span id="voiceSelectLabel">Voz</span>
                 <select id="voiceSelect">
-                  <option value="">Voz del sistema</option>
+                  <option id="defaultVoiceOption" value="">Voz del sistema</option>
+                </select>
+              </label>
+              <label class="voice-select-wrap speech-language-wrap" id="speechLanguageWrap" hidden>
+                <span id="speechLanguageLabel">Escuchar</span>
+                <select id="speechLanguageSelect">
+                  <option value="en-US">English</option>
+                  <option value="fr-FR">Français</option>
+                  <option value="es-CO">Español</option>
                 </select>
               </label>
             </div>

@@ -2314,6 +2314,21 @@ function shouldStartQuizFromMessage({ history, message }) {
     return false;
   }
 
+  const quizRefusal =
+    /\b(no|nunca|tampoco|sin)\b.{0,40}\b(quiz|quices|cuestionario|preguntas|evaluacion|prueba|test)\b/.test(
+      normalized
+    ) ||
+    /\b(quiz|quices|cuestionario|preguntas|evaluacion|prueba|test)\b.{0,40}\b(no|ahora no|por ahora no|todavia no|todavía no|despues|después|mas tarde|más tarde|luego)\b/.test(
+      normalized
+    ) ||
+    /\b(no quiero|no deseo|no necesito|prefiero no|dejemoslo para despues|dejémoslo para después|mas tarde|más tarde|por ahora no|ahora no)\b/.test(
+      normalized
+    );
+
+  if (quizRefusal) {
+    return false;
+  }
+
   const explicitQuizRequest =
     /\b(quiz|quices|cuestionario|preguntas|evaluacion|prueba|test|opcion multiple|opciones multiples|seleccion multiple|marcar respuesta|marca la respuesta|preguntas rapidas)\b/.test(
       normalized
