@@ -499,9 +499,20 @@ function containsImagePromise(text) {
     return false;
   }
 
-  return /\b(adjunto|adjunta|aqui tienes|aquí tienes|te envio|te envío|envio el|envío el|png|jpg|imagen generada|grafica solicitada|gráfica solicitada)\b/.test(
-    normalized
-  );
+  const spanishPromise =
+    /\b(adjunto|adjunta|aqui tienes|te envio|envio el|png|jpg|imagen generada|grafica solicitada)\b/.test(
+      normalized
+    );
+  const englishPromise =
+    /\b(here is the image|here's the image|image i created|image generated|i created|alt text|the image shows|photo i created|would you like .* quiz .* image)\b/.test(
+      normalized
+    );
+  const frenchPromise =
+    /\b(voici l'image|voici la image|image que j'ai creee|image generee|j'ai cree|texte alternatif|l'image montre)\b/.test(
+      normalized
+    );
+
+  return spanishPromise || englishPromise || frenchPromise;
 }
 
 async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLevel }) {
@@ -596,6 +607,13 @@ function buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel }) {
 
 function buildVerifiedImageOnlyReply({ subjectMode, prompt }) {
   const subjectLabel = getSubjectLabel(subjectMode);
+  if (subjectMode === "languages") {
+    return {
+      type: "text",
+      reply:
+        "I could not generate the requested image in this attempt. Please try the request again."
+    };
+  }
 
   return {
     type: "text",
@@ -3203,17 +3221,17 @@ function isExplicitVisualRequest(normalized) {
   }
 
   const visualVerbPattern =
-    /\b(muestrame|muéstrame|muestra|genera|crea|haz|hazme|quiero ver|me gustaria ver|dame|ensename|enséñame|presenta|ilustra|dibuja|traza|grafica|representa)\b/;
+    /\b(muestrame|muestra|genera|crea|haz|hazme|quiero ver|me gustaria ver|dame|ensename|presenta|ilustra|dibuja|traza|grafica|representa|show me|show|generate|generated|create|make|draw|illustrate|give me|display|montre moi|montre|genere|cree|creer|dessine|illustrer|donne moi)\b/;
   const visualNounPattern =
-    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|grafica|graficas|curva|curvas|mapa|linea de tiempo|tabla|referencias visuales|referentes visuales)\b/;
+    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|grafica|graficas|curva|curvas|mapa|linea de tiempo|tabla|referencias visuales|referentes visuales|image|images|photo|photos|illustration|illustrations|diagram|scheme|chart|charts|graph|graphs|curve|curves|map|picture|pictures|diagramme|schema|graphique|carte)\b/;
 
   if (visualVerbPattern.test(normalized) && visualNounPattern.test(normalized)) {
     return true;
   }
 
   if (
-    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|mapa|linea de tiempo)\b/.test(normalized) &&
-    /\b(de|del|sobre|con|para)\b/.test(normalized)
+    /\b(imagen|imagenes|foto|fotos|ilustracion|ilustraciones|diagrama|esquema|mapa|linea de tiempo|image|images|photo|photos|illustration|illustrations|diagram|picture|pictures|diagramme|schema|graphique|carte)\b/.test(normalized) &&
+    /\b(de|del|sobre|con|para|of|about|with|for|de|sur|avec|pour)\b/.test(normalized)
   ) {
     return true;
   }
