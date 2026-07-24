@@ -16,6 +16,9 @@ const state = {
   autoSpeak: true,
   handsFree: false,
   selectedVoiceName: "",
+  voicePreference: "neutral",
+  voiceLanguages: ["es"],
+  subjectMode: "physics",
   shouldSubmitAfterRecognition: false,
   voicePaused: false,
   isSpeaking: false,
@@ -190,7 +193,8 @@ elements.form.addEventListener("submit", async (event) => {
 
 async function bootstrap() {
   const response = await fetch("/api/config");
-  const config = await response.json();
+  const rawConfig = await response.json();
+  const config = normalizeTutorConfig(rawConfig);
   state.initialConfig = config;
 
   state.avatarClosed = false;
@@ -203,6 +207,11 @@ async function bootstrap() {
   state.tutorName = config.tutorName || state.tutorName;
   state.schoolName = config.schoolName || state.schoolName;
   state.subjectName = config.subjectName || state.subjectName;
+  state.subjectMode = config.subjectMode || state.subjectMode;
+  state.voicePreference = config.voicePreference || state.voicePreference;
+  state.voiceLanguages = Array.isArray(config.voiceLanguages) && config.voiceLanguages.length
+    ? config.voiceLanguages
+    : state.voiceLanguages;
 
   document.title = config.pageTitle || "Tutor IA Embebible";
   elements.heroEyebrow.textContent = config.heroEyebrow || `Tutor IA de ${state.subjectName}`;
@@ -245,6 +254,56 @@ async function bootstrap() {
   }
 
   startTutorSession(config);
+}
+
+function normalizeTutorConfig(config) {
+  const nextConfig = { ...(config || {}) };
+  const tutorName = String(nextConfig.tutorName || "").toLowerCase();
+  const isEmily = tutorName.includes("emily");
+
+  if (!isEmily) {
+    return nextConfig;
+  }
+
+  return {
+    ...nextConfig,
+    tutorName: nextConfig.tutorName || "Miss Emily",
+    subjectName: "English and French",
+    subjectMode: "languages",
+    pageTitle: "Embeddable English and French Tutor",
+    heroEyebrow: "AI Tutor for English and French",
+    heroLead:
+      "Conversation practice, grammar, pronunciation, vocabulary, reading, writing, guided translation and learning activities in English and French.",
+    heroQuoteText:
+      '"Learning a language opens doors to understand other cultures, communicate with confidence and discover new ways of thinking."',
+    heroQuoteAuthor: "VIRTUAL PLANET LANGUAGE EDUCATION",
+    avatarUrl: nextConfig.avatarUrl || "https://i.ibb.co/vx2W7vrj/MISS-EMILY-INGL-S.png",
+    avatarAlt: "Avatar of Miss Emily, English and French teacher",
+    chatEyebrow: "Interactive classroom",
+    timerKicker: "Work time",
+    timerHint: "You have 15 minutes to work with the avatar.",
+    topicLabel: "Topic",
+    goalLabel: "Goal",
+    defaultTopic: "English and French",
+    defaultLearningGoal: "Practice the language, improve comprehension and produce clear answers",
+    messagePlaceholder: "Write your English or French question here...",
+    helperText:
+      "Tip: ask for conversation practice, text correction, grammar explanations, vocabulary, guided translation, pronunciation or quizzes.",
+    voicePreference: "female",
+    voiceLanguages: ["en", "fr", "es"],
+    welcomeMessage:
+      "Hello, I am Miss Emily. I can help you practice English and French with conversation, grammar, vocabulary, pronunciation, reading, writing and guided correction. I will use the language you request or imply.",
+    suggestedPrompts: Array.isArray(nextConfig.suggestedPrompts) && nextConfig.suggestedPrompts.length
+      ? nextConfig.suggestedPrompts
+      : [
+          "Practice a short conversation with me in English",
+          "Explain the verb to be with simple examples",
+          "Correct this paragraph in English and explain the changes",
+          "Faisons une petite conversation en français",
+          "Explain French articles: le, la, les, un, une",
+          "Give me a quick quiz about present simple"
+        ]
+  };
 }
 
 async function initializeAccessGate() {
@@ -1534,14 +1593,15 @@ function speakText(text, onEnd) {
   updateVoiceUi();
   setVoiceStatus("Leyendo respuesta...", "speaking");
   const utterance = new SpeechSynthesisUtterance(cleanTextForSpeech(text));
-  utterance.lang = "es-CO";
+  const speechLang = detectSpeechLanguage(text);
+  utterance.lang = speechLang;
   utterance.rate = 1;
   utterance.pitch = 1;
 
   const voices = window.speechSynthesis.getVoices();
   const preferredVoice =
     voices.find((voice) => voice.name === state.selectedVoiceName) ||
-    voices.find((voice) => voice.lang.toLowerCase().startsWith("es"));
+    pickPreferredVoice(voices, speechLang);
   if (preferredVoice) {
     utterance.voice = preferredVoice;
   }
@@ -1582,7 +1642,7 @@ function populateVoiceOptions() {
 
   const voices = window.speechSynthesis
     .getVoices()
-    .filter((voice) => voice.lang.toLowerCase().startsWith("es"));
+    .filter((voice) => isAllowedVoiceLanguage(voice));
 
   elements.voiceSelect.innerHTML = '<option value="">Voz del sistema</option>';
   voices.forEach((voice) => {
@@ -1591,6 +1651,112 @@ function populateVoiceOptions() {
     option.textContent = `${voice.name} (${voice.lang})`;
     elements.voiceSelect.appendChild(option);
   });
+}
+
+function isAllowedVoiceLanguage(voice) {
+  const lang = voice.lang.toLowerCase();
+  return state.voiceLanguages.some((prefix) => lang.startsWith(prefix.toLowerCase()));
+}
+
+function detectSpeechLanguage(text) {
+  const normalized = normalizeForVoice(text);
+  if (state.subjectMode !== "languages") {
+    return "es-CO";
+  }
+
+  const frenchScore = countMatches(normalized, [
+    "bonjour",
+    "salut",
+    "merci",
+    "avec",
+    "pour",
+    "dans",
+    "une",
+    "des",
+    "les",
+    "est-ce",
+    "vous",
+    "nous",
+    "être",
+    "avoir",
+    "passé composé",
+    "français"
+  ]);
+  const englishScore = countMatches(normalized, [
+    "hello",
+    "good",
+    "please",
+    "because",
+    "with",
+    "about",
+    "grammar",
+    "vocabulary",
+    "present simple",
+    "past simple",
+    "pronunciation",
+    "english"
+  ]);
+
+  if (frenchScore > englishScore && frenchScore > 0) {
+    return "fr-FR";
+  }
+  if (englishScore > 0) {
+    return "en-US";
+  }
+
+  return "es-CO";
+}
+
+function pickPreferredVoice(voices, speechLang) {
+  const langPrefix = speechLang.slice(0, 2).toLowerCase();
+  const candidates = voices.filter((voice) => voice.lang.toLowerCase().startsWith(langPrefix));
+  if (!candidates.length) {
+    return voices.find((voice) => voice.lang.toLowerCase().startsWith("es"));
+  }
+
+  if (state.voicePreference === "female") {
+    const femaleVoice = candidates.find((voice) => isLikelyFemaleVoice(voice.name));
+    if (femaleVoice) {
+      return femaleVoice;
+    }
+  }
+
+  return candidates[0];
+}
+
+function isLikelyFemaleVoice(name) {
+  const normalized = normalizeForVoice(name);
+  return [
+    "sabina",
+    "helena",
+    "laura",
+    "elvira",
+    "zira",
+    "aria",
+    "jenny",
+    "susan",
+    "denise",
+    "hortense",
+    "julie",
+    "amelie",
+    "camila",
+    "paulina",
+    "monica",
+    "sofia",
+    "lucia",
+    "maria"
+  ].some((cue) => normalized.includes(cue));
+}
+
+function countMatches(text, cues) {
+  return cues.reduce((total, cue) => (text.includes(normalizeForVoice(cue)) ? total + 1 : total), 0);
+}
+
+function normalizeForVoice(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function startRecognition() {

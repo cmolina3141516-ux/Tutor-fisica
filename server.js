@@ -260,6 +260,13 @@ async function generateTutorReply(payload) {
         "Soy el profesor Andrés y este tutor trabaja solo Ciencias Naturales y Química. Si quieres, puedo ayudarte con biología, ecología, ambiente, método científico, materia, reacciones químicas, estequiometría, soluciones, laboratorio o proyectos escolares científicos."
     };
   }
+  if (subjectMode === "languages" && shouldRejectAsNonLanguages(effectiveUserMessage)) {
+    return {
+      type: "text",
+      reply:
+        "I am Miss Emily, and this tutor works only with English and French. I can help you translate, practice conversation, correct texts, build vocabulary, understand grammar, improve pronunciation, or prepare activities in either language."
+    };
+  }
   if (
     !isQuizMode &&
     !hasLatestAttachments &&
@@ -330,7 +337,7 @@ async function generateTutorReply(payload) {
   }
 
   const systemText = isQuizMode
-    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opción múltiple para marcar en pantalla.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las preguntas deben ser cortas, claras y centradas en el tema conversado o solicitado.\n- Las explicaciones de cada respuesta correcta deben ser breves, útiles y aptas para discusión posterior.\n- El closing debe invitar explícitamente a discutir las respuestas y explicar las correctas, por ejemplo: \"Si quieres, discutimos tus respuestas una por una y repasamos por qué cada opción correcta es la adecuada.\"\n- Todo en espanol.`
+    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opción múltiple para marcar en pantalla.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las preguntas deben ser cortas, claras y centradas en el tema conversado o solicitado.\n- Las explicaciones de cada respuesta correcta deben ser breves, útiles y aptas para discusión posterior.\n- El closing debe invitar explícitamente a discutir las respuestas y explicar las correctas, por ejemplo: \"Si quieres, discutimos tus respuestas una por una y repasamos por qué cada opción correcta es la adecuada.\"\n- ${buildQuizLanguageInstruction({ subjectMode, message: effectiveUserMessage })}`
     : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.\n- Después de explicar un tema, resolver una duda o desarrollar un ejemplo, cierra con una invitación breve y amable a hacer un quiz rápido de opción múltiple sobre ese mismo tema. No generes el quiz todavía salvo que el estudiante lo pida o acepte.${buildAttachmentPriorityInstructions({
         hasLatestAttachments,
         hasLatestImageAttachment,
@@ -516,6 +523,8 @@ function getSubjectLabel(subjectMode) {
         ? "Ciencias Sociales"
       : subjectMode === "natural_sciences"
         ? "Ciencias Naturales y Química"
+        : subjectMode === "languages"
+          ? "Inglés y Francés"
         : "Física";
 }
 
@@ -2414,11 +2423,13 @@ function buildStudentContext(session) {
   const subjectMode = getSubjectMode();
   const defaultTopic =
     subjectMode === "mathematics"
-      ? "Matemáticas generales"
+        ? "Matemáticas generales"
       : subjectMode === "social_studies"
         ? "Ciencias sociales generales"
         : subjectMode === "natural_sciences"
           ? "Ciencias naturales y química"
+          : subjectMode === "languages"
+            ? "Inglés y francés"
         : "Fisica general";
   const lines = [
     `Nombre del estudiante: ${session.student_name || "No indicado"}`,
@@ -2433,6 +2444,22 @@ function buildStudentContext(session) {
   return lines.join("\n");
 }
 
+function buildQuizLanguageInstruction({ subjectMode, message }) {
+  if (subjectMode !== "languages") {
+    return "Todo en espanol.";
+  }
+
+  const normalized = normalizeText(message);
+  if (/frances|franc[eé]s|french|bonjour|salut|merci|passe compose|pass[eé] compos[eé]/.test(normalized)) {
+    return "Para Miss Emily, redacta el quiz principalmente en francés, con explicaciones breves y claras en francés. Puedes incluir una aclaración corta en español si el estudiante lo necesita.";
+  }
+  if (/ingles|ingl[eé]s|english|hello|present simple|past simple|verb to be|pronunciation|vocabulary/.test(normalized)) {
+    return "Para Miss Emily, redacta el quiz principalmente en inglés, con explicaciones breves y claras en inglés. Puedes incluir una aclaración corta en español si el estudiante lo necesita.";
+  }
+
+  return "Para Miss Emily, redacta el quiz en el idioma de práctica que el estudiante haya usado o solicitado. Si no hay idioma claro, usa español con ejemplos en inglés y francés.";
+}
+
 function parseQuizReply(reply) {
   const subjectMode = getSubjectMode();
   const defaultQuizTitle =
@@ -2442,6 +2469,8 @@ function parseQuizReply(reply) {
         ? "Quiz rapido de ciencias sociales"
         : subjectMode === "natural_sciences"
           ? "Quiz rapido de ciencias naturales y química"
+          : subjectMode === "languages"
+            ? "Quiz rapido de inglés y francés"
         : "Quiz rapido de fisica";
   let parsed;
   try {
@@ -2822,6 +2851,94 @@ function shouldRejectAsNonNaturalSciences(text) {
   return nonNaturalCues.some((cue) => normalized.includes(cue));
 }
 
+function shouldRejectAsNonLanguages(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const languageCues = [
+    "ingles",
+    "inglés",
+    "english",
+    "frances",
+    "francés",
+    "french",
+    "idioma",
+    "language",
+    "grammar",
+    "gramatica",
+    "gramática",
+    "vocabulario",
+    "vocabulary",
+    "pronunciacion",
+    "pronunciación",
+    "pronunciation",
+    "listening",
+    "speaking",
+    "reading",
+    "writing",
+    "conversation",
+    "conversacion",
+    "conversación",
+    "translate",
+    "traduce",
+    "traducir",
+    "traduccion",
+    "traducción",
+    "corrige",
+    "corregir",
+    "verbo",
+    "verb",
+    "present simple",
+    "past simple",
+    "future",
+    "conditionnel",
+    "passe compose",
+    "passé composé",
+    "articles",
+    "le la les",
+    "to be",
+    "have got",
+    "bonjour",
+    "hello",
+    "salut",
+    "good morning",
+    "merci",
+    "please"
+  ];
+
+  if (languageCues.some((cue) => normalized.includes(cue))) {
+    return false;
+  }
+
+  const nonLanguageCues = [
+    "matemat",
+    "algebra",
+    "ecuacion",
+    "derivada",
+    "fisica",
+    "newton",
+    "mru",
+    "mrua",
+    "fuerza",
+    "energia",
+    "quimica",
+    "biologia",
+    "celula",
+    "historia",
+    "geografia",
+    "constitucion",
+    "democracia",
+    "sociales",
+    "programacion",
+    "codigo",
+    "robotica"
+  ];
+
+  return nonLanguageCues.some((cue) => normalized.includes(cue));
+}
+
 function shouldAskForClarification({ message, subjectMode }) {
   const normalized = normalizeText(message);
   if (!normalized) {
@@ -2921,6 +3038,8 @@ function buildClarificationReply({ message, subjectMode }) {
         ? "ciencias sociales"
         : subjectMode === "natural_sciences"
           ? "ciencias naturales y química"
+          : subjectMode === "languages"
+            ? "inglés y francés"
           : "física";
 
   const safeTopic = topic || `ese tema de ${subjectName}`;
@@ -3139,6 +3258,8 @@ function buildTutorConfig() {
         ? "Profesora Laura"
         : subjectMode === "natural_sciences"
           ? "Profesor Andrés"
+          : subjectMode === "languages"
+            ? "Miss Emily"
         : "Profesor Julián");
 
   if (subjectMode === "mathematics") {
@@ -3165,6 +3286,9 @@ function buildTutorConfig() {
       messagePlaceholder: "Escribe tu duda de matemáticas aquí...",
       helperText:
         "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso de matemáticas.",
+      subjectMode,
+      voicePreference: "neutral",
+      voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Esteban. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Matemáticas.",
       suggestedPrompts: [
@@ -3206,6 +3330,9 @@ function buildTutorConfig() {
       messagePlaceholder: "Escribe tu duda de ciencias sociales aquí...",
       helperText:
         "Consejo: pide explicaciones, líneas de tiempo, comparaciones históricas, quizzes o análisis social escolar.",
+      subjectMode,
+      voicePreference: "female",
+      voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy la profesora Laura. Puedo ayudarte con explicaciones claras, análisis guiado y aclaración de dudas sobre temas de Ciencias Sociales. Este tutor trabaja solo dentro de esta asignatura.",
       suggestedPrompts: [
@@ -3219,6 +3346,50 @@ function buildTutorConfig() {
         "Ayúdame a preparar una exposición sobre globalización",
         "Analiza un tema actual político o social con enfoque escolar y neutral",
         "Explícame economía básica: oferta, demanda e inflación"
+      ]
+    };
+  }
+
+  if (subjectMode === "languages") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "English and French",
+      pageTitle: "Embeddable English and French Tutor",
+      heroEyebrow: "AI Tutor for English and French",
+      heroLead:
+        "Conversation practice, grammar, pronunciation, vocabulary, reading, writing, guided translation and learning activities in English and French.",
+      heroQuoteText:
+        '"Learning a language opens doors to understand other cultures, communicate with confidence and discover new ways of thinking."',
+      heroQuoteAuthor: "VIRTUAL PLANET LANGUAGE EDUCATION",
+      avatarUrl: process.env.AVATAR_URL || "https://i.ibb.co/vx2W7vrj/MISS-EMILY-INGL-S.png",
+      avatarAlt: "Avatar of Miss Emily, English and French teacher",
+      chatEyebrow: "Interactive classroom",
+      timerKicker: "Work time",
+      timerHint: "You have 15 minutes to work with the avatar.",
+      topicLabel: "Topic",
+      goalLabel: "Goal",
+      defaultTopic: "English and French",
+      defaultLearningGoal: "Practice the language, improve comprehension and produce clear answers",
+      messagePlaceholder: "Write your English or French question here...",
+      helperText:
+        "Tip: ask for conversation practice, text correction, grammar explanations, vocabulary, guided translation, pronunciation or quizzes.",
+      subjectMode,
+      voicePreference: "female",
+      voiceLanguages: ["en", "fr", "es"],
+      welcomeMessage:
+        "Hello, I am Miss Emily. I can help you practice English and French with conversation, grammar, vocabulary, pronunciation, reading, writing and guided correction. I will use the language you request or imply.",
+      suggestedPrompts: [
+        "Practice a short conversation with me in English",
+        "Explícame el verbo to be con ejemplos sencillos",
+        "Corrige este párrafo en inglés y explícame los cambios",
+        "Faisons une petite conversation en français",
+        "Explícame los artículos en francés: le, la, les, un, une",
+        "Give me a quick quiz about present simple",
+        "Ayúdame a preparar una presentación corta en inglés",
+        "Tradúceme esta frase y explícame por qué se dice así",
+        "Practice pronunciation words for school",
+        "Explícame passé composé con ejemplos"
       ]
     };
   }
@@ -3247,6 +3418,9 @@ function buildTutorConfig() {
       messagePlaceholder: "Escribe tu duda de ciencias naturales o química aquí...",
       helperText:
         "Consejo: pide explicaciones, problemas de química paso a paso, ideas de proyectos, quizzes, análisis de imágenes o apoyo para presentaciones.",
+      subjectMode,
+      voicePreference: "neutral",
+      voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, resolución de problemas, proyectos transversales, presentaciones, prácticas de laboratorio y aclaración de dudas sobre Ciencias Naturales y Química. Este tutor trabaja solo dentro de estas áreas.",
       suggestedPrompts: [
@@ -3297,6 +3471,9 @@ function buildTutorConfig() {
       hybridPhysicsMathTutor
         ? "Consejo: prueba pedir una explicación, un quiz, una gráfica o resolver un ejercicio paso a paso de física o matemáticas."
         : "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
+    subjectMode,
+    voicePreference: "neutral",
+    voiceLanguages: ["es"],
     welcomeMessage:
       hybridPhysicsMathTutor
         ? "Hola soy el profesor Julián. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios, resolución de problemas y aclaración de dudas sobre Física y Matemáticas."
@@ -3321,6 +3498,7 @@ function buildTutorConfig() {
 
 function getSubjectMode() {
   const value = String(process.env.TUTOR_SUBJECT || "physics").toLowerCase();
+  const tutorName = String(process.env.TUTOR_NAME || "").toLowerCase();
   if (["math", "mathematics", "matematicas", "matemáticas"].includes(value)) {
     return "mathematics";
   }
@@ -3329,6 +3507,9 @@ function getSubjectMode() {
   }
   if (["natural", "naturales", "natural_sciences", "ciencias naturales", "ciencias_naturales"].includes(value)) {
     return "natural_sciences";
+  }
+  if (["languages", "language", "idiomas", "ingles", "inglés", "frances", "francés", "english", "french"].includes(value) || tutorName.includes("emily")) {
+    return "languages";
   }
   return "physics";
 }
@@ -3928,6 +4109,54 @@ Formato recomendado:
 - Explicacion
 - Comparación, línea de tiempo o ejemplo
 - Siguiente paso sugerido`;
+  }
+
+  if (subjectMode === "languages") {
+    return `You are Miss Emily, a virtual English and French teacher for middle and high school students in Colombia.
+
+Core identity:
+- You teach English and French with native-like fluency, clarity and warmth.
+- Your default response language is English.
+- Use French when the student explicitly asks for French practice or writes in French.
+- Use Spanish only if the student explicitly asks for a Spanish explanation.
+- If the student writes in English, answer mainly in English.
+- If the student writes in French, answer mainly in French.
+- If the student explicitly asks for English or French, use that target language.
+- If the student asks in Spanish about English or French, answer mainly in English unless they explicitly request Spanish support.
+
+Teaching style:
+- Be clear, patient, conversational and precise.
+- Adapt the explanation to grades 6° to 11°.
+- Prioritize communication, pronunciation, vocabulary, grammar, reading and writing.
+- Correct errors kindly and explain the correction briefly.
+
+Pedagogical rules:
+- If the student asks for conversation practice, role-play naturally and keep the dialogue going.
+- If the student asks for grammar, give a short explanation, examples and a mini practice.
+- If the student asks for translation, translate and explain the key expression or structure.
+- If the student asks for pronunciation, provide syllable hints, stress and a simple practice line.
+- If the student asks for a quiz, create questions appropriate to the grade and the target language.
+- If the student uploads images or PDFs, help with reading, vocabulary, comprehension, translation or language tasks related to English or French.
+- Stay within English and French. If the student asks for another subject, politely say that this tutor works only on English and French and offer to convert the request into language practice.
+
+Frequent topics:
+- Basic and intermediate English conversation
+- French conversation
+- Vocabulary by topic
+- Present simple, past simple, future and conditionals
+- Verb to be, modal verbs, questions and negatives
+- Articles, gender and number in French
+- Présent, passé composé and futur proche
+- Reading comprehension
+- Writing correction
+- Pronunciation practice
+- Translation and guided paraphrase
+
+Recommended format:
+- Short answer in the needed language
+- Clear examples
+- Mini practice
+- Suggested next step`;
   }
 
   if (subjectMode === "natural_sciences") {
