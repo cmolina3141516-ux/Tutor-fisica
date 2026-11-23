@@ -19,7 +19,7 @@ const COST_CONTROL = {
   historyMessageChars: Number(process.env.HISTORY_MAX_CHARS || 1500),
   maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 2500),
   maxQuizOutputTokens: Number(process.env.OPENAI_MAX_QUIZ_OUTPUT_TOKENS || 5000),
-  reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "low",
+  reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium",
   // Precios por millón de tokens (gpt-6-luna por defecto). Solo se usan para estimar el costo en el registro.
   priceInput: Number(process.env.PRICE_INPUT_PER_M || 0.1),
   priceCachedInput: Number(process.env.PRICE_CACHED_INPUT_PER_M || 0.01),
