@@ -13,9 +13,10 @@ const state = {
   isRecording: false,
   lastAssistantReply: "",
   recognition: null,
-  autoSpeak: true,
+  autoSpeak: false,
   handsFree: false,
   selectedVoiceName: "",
+  voiceChosenByStudent: false,
   voicePreference: "neutral",
   voiceLanguages: ["es"],
   speechRecognitionLanguage: "es-CO",
@@ -204,6 +205,8 @@ elements.autoSpeakToggle.addEventListener("change", () => {
 
 elements.voiceSelect.addEventListener("change", () => {
   state.selectedVoiceName = elements.voiceSelect.value;
+  // Si el estudiante elige una voz, se respeta; si vuelve a "Voz del sistema", se elige de nuevo la recomendada.
+  state.voiceChosenByStudent = Boolean(elements.voiceSelect.value);
 });
 
 elements.speechLanguageSelect?.addEventListener("change", () => {
@@ -674,7 +677,8 @@ function appendAssistantResult(result) {
   const reply = result.reply || "No hubo respuesta.";
   state.lastAssistantReply = reply;
   appendMessage("assistant", reply, result.images || []);
-  if (state.autoSpeak && !state.voicePaused) {
+  // La voz solo suena si el estudiante la pidió: lectura automática marcada o modo manos libres.
+  if ((state.autoSpeak || state.handsFree) && !state.voicePaused) {
     speakText(reply, maybeResumeHandsFree);
   } else {
     maybeResumeHandsFree();
@@ -956,11 +960,63 @@ function requestQuizDiscussion(quizState, mode) {
   elements.form.requestSubmit();
 }
 
+// Respaldo: si el modelo escribe LaTeX o Markdown (la interfaz no los interpreta),
+// se convierte a la notación plana que sí se muestra bien (x^2, v_f, √(...), ·).
+const GREEK_LETTERS = {
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", Delta: "Δ", theta: "θ", lambda: "λ", mu: "μ", omega: "ω",
+  Omega: "Ω", pi: "π", rho: "ρ", sigma: "σ", Sigma: "Σ", phi: "φ", tau: "τ", epsilon: "ε", eta: "η"
+};
+
+function latexToPlainText(text) {
+  let out = String(text || "");
+  if (!/\\[a-zA-Z[\](),;!]|\*\*|^#{1,6}\s|\$/m.test(out)) {
+    return out;
+  }
+
+  out = out
+    .replace(/\\\[|\\\]|\$\$/g, "\n")
+    .replace(/\\\(|\\\)/g, "")
+    .replace(/\$([^$\n]+)\$/g, "$1")
+    .replace(/\{,\}/g, ",")
+    .replace(/\\(?:text|mathrm|mathbf|operatorname|vec)\{([^{}]*)\}/g, "$1")
+    .replace(/\\[,;: !]|\\quad|\\qquad|\\left|\\right/g, " ");
+
+  for (let i = 0; i < 4; i += 1) {
+    out = out
+      .replace(/_\{([^{}]*)\}/g, (_m, sub) => `_${sub.replace(/\s+/g, "")}`)
+      .replace(/\^\{([^{}]*)\}/g, (_m, sup) => (sup.trim().length === 1 ? `^${sup.trim()}` : `^(${sup.trim()})`))
+      .replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_m, a, b) => {
+        const wrap = (value) => (/^[\w.,μθαβγωπρσφτ]+$/.test(value.trim()) ? value.trim() : `(${value.trim()})`);
+        return `${wrap(a)}/${wrap(b)}`;
+      })
+      .replace(/\\sqrt\{([^{}]*)\}/g, "√($1)")
+      .replace(/\\boxed\{([^{}]*)\}/g, "$1");
+  }
+
+  return out
+    .replace(/\^\\circ/g, "°")
+    .replace(/\\(?:cdot|times)(?![a-zA-Z])/g, "·")
+    .replace(/\\approx(?![a-zA-Z])/g, "≈")
+    .replace(/\\(?:Rightarrow|implies)(?![a-zA-Z])/g, "⇒")
+    .replace(/\\to(?![a-zA-Z])/g, "→")
+    .replace(/\\pm(?![a-zA-Z])/g, "±")
+    .replace(/\\(?:leq?|le)(?![a-zA-Z])/g, "≤")
+    .replace(/\\(?:geq?|ge)(?![a-zA-Z])/g, "≥")
+    .replace(/\\neq?(?![a-zA-Z])/g, "≠")
+    .replace(/\\(sin|cos|tan|ln|log)(?![a-zA-Z])/g, " $1 ")
+    .replace(/\\([a-zA-Z]+)/g, (match, name) => GREEK_LETTERS[name] || "")
+    .replace(/[{}]/g, "")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/^#{1,6}\s+(.+)$/gm, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 function renderRichText(text) {
   const root = document.createElement("div");
   root.className = "rich-text";
 
-  const segments = splitRichTextSegments(String(text || ""));
+  const segments = splitRichTextSegments(latexToPlainText(String(text || "")));
   segments.forEach((segment) => {
     if (segment.type === "code") {
       root.appendChild(renderCodeBlock(segment.content));
@@ -1169,7 +1225,7 @@ function formatInlineMathHtml(text, isEquation = false) {
     (_, base, exponent) => `${base}<sup>${escapeHtml(exponent.replace(/[{}]/g, ""))}</sup>`
   );
   html = html.replace(
-    /([A-Za-zÁÉÍÓÚáéíóúÑñ])_([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ]+)/g,
+    /([A-Za-zÁÉÍÓÚáéíóúÑñα-ωΑ-Ω])_([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ]+)/g,
     (_, base, subscript) => `${base}<sub>${escapeHtml(subscript)}</sub>`
   );
   html = html.replace(/\bpi\b/gi, "π");
@@ -1857,11 +1913,107 @@ function speakText(text, onEnd) {
   window.speechSynthesis.speak(utterance);
 }
 
+// Convierte Markdown y LaTeX en texto que se pueda leer en voz alta sin símbolos raros.
 function cleanTextForSpeech(text) {
-  return String(text || "")
+  const spanish = state.subjectMode !== "languages";
+  const w = spanish
+    ? { over: "sobre", root: "raíz de", times: "por", squared: "al cuadrado", cubed: "al cubo", power: "a la", approx: "aproximadamente", equals: "igual a", degrees: "grados", minus: "menos", plus: "más", sin: "seno", cos: "coseno", tan: "tangente", ms2: "metros por segundo al cuadrado", ms: "metros por segundo", kmh: "kilómetros por hora", kg: "kilogramos", decimal: "coma" }
+    : { over: "over", root: "square root of", times: "times", squared: "squared", cubed: "cubed", power: "to the power of", approx: "approximately", equals: "equals", degrees: "degrees", minus: "minus", plus: "plus", sin: "sine", cos: "cosine", tan: "tangent", ms2: "meters per second squared", ms: "meters per second", kmh: "kilometers per hour", kg: "kilograms", decimal: "point" };
+
+  const speakUnits = (value) =>
+    value
+      .replace(/\bm\s*\/\s*s\s*(?:\^\{?2\}?|²)/g, ` ${w.ms2}`)
+      .replace(/\bkm\s*\/\s*h\b/g, ` ${w.kmh}`)
+      .replace(/\bm\s*\/\s*s\b/g, ` ${w.ms}`)
+      .replace(/(\d)\s*kg\b/g, `$1 ${w.kg}`);
+
+  const speakMath = (math) => {
+    let out = speakUnits(
+      math
+        .replace(/\{,\}/g, ",")
+        .replace(/\\boxed\{([^{}]*)\}/g, "$1")
+        .replace(/\\(?:text|mathrm|mathbf|operatorname|vec)\{([^{}]*)\}/g, "$1")
+        .replace(/\\[,;: !]|\\quad|\\qquad|\\left|\\right/g, " ")
+    );
+    // De adentro hacia afuera: subíndices y exponentes con llaves, luego fracciones, raíces y recuadros.
+    for (let i = 0; i < 4; i += 1) {
+      out = out
+        .replace(/_\{([^{}]*)\}/g, " $1 ")
+        .replace(/\^\{([^{}]*)\}/g, "^$1 ")
+        .replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, ` $1 ${w.over} $2 `)
+        .replace(/\\sqrt\{([^{}]*)\}/g, ` ${w.root} $1 `)
+        .replace(/\\boxed\{([^{}]*)\}/g, " $1 ");
+    }
+    out = out.replace(/[{}]/g, " ");
+    return out
+      .replace(/\^\\circ|°/g, ` ${w.degrees}`)
+      .replace(/\^\s*2\b|²/g, ` ${w.squared}`)
+      .replace(/\^\s*3\b|³/g, ` ${w.cubed}`)
+      .replace(/\^\s*(\S+)/g, ` ${w.power} $1`)
+      .replace(/\\sin(?![a-zA-Z])/g, ` ${w.sin} `)
+      .replace(/\\cos(?![a-zA-Z])/g, ` ${w.cos} `)
+      .replace(/\\tan(?![a-zA-Z])/g, ` ${w.tan} `)
+      .replace(/\\(?:cdot|times)(?![a-zA-Z])|·|×/g, ` ${w.times} `)
+      .replace(/\\approx(?![a-zA-Z])|≈/g, ` ${w.approx} `)
+      .replace(/\\Delta(?![a-zA-Z])\s*/g, " delta ")
+      .replace(/\\(alpha|beta|gamma|theta|lambda|mu|omega|pi|rho|sigma|phi|tau|epsilon)(?![a-zA-Z])/g, " $1 ")
+      .replace(/\\Rightarrow|\\to(?![a-zA-Z])|→/g, ", ")
+      .replace(/_\s*(\w)/g, " $1 ")
+      .replace(/\\[a-zA-Z]+/g, " ")
+      .replace(/(\d),(\d)/g, `$1 ${w.decimal} $2`)
+      .replace(/\s*=\s*/g, ` ${w.equals} `)
+      .replace(/\s+-\s*|(?<=[\w)])-(?=[\w(\\])/g, ` ${w.minus} `)
+      .replace(/\s*\+\s*/g, ` ${w.plus} `)
+      .replace(/(\d)\s*\(/g, `$1 ${w.times} (`)
+      .replace(/\)\s*\(/g, `) ${w.times} (`)
+      .replace(/[()]/g, " ");
+  };
+
+  let output = String(text || "")
     .replace(/\[Quiz interactivo\]\s*/g, "")
     .replace(/https?:\/\/\S+/g, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$\$([\s\S]*?)\$\$|\$([^$\n]+)\$/g, (_m, a, b, c, d) => ` ${speakMath(a || b || c || d || "")} `);
+
+  // Notación plana (la que pide el prompt): x^2, v_f, √(...), a/b, μ, θ, Δ, −.
+  output = speakUnits(output)
+    .replace(/\^\s*2\b/g, ` ${w.squared}`)
+    .replace(/\^\s*3\b/g, ` ${w.cubed}`)
+    .replace(/\^\s*\(?([\w−-]+)\)?/g, ` ${w.power} $1`)
+    .replace(/√\s*/g, ` ${w.root} `)
+    .replace(/μ/g, " mu ")
+    .replace(/θ/g, " theta ")
+    .replace(/Δ\s*/g, " delta ")
+    .replace(/π/g, " pi ")
+    .replace(/\s*_\s*(\w+)/g, " $1")
+    .replace(/\b(?:sin|sen)\b/g, ` ${w.sin} `)
+    .replace(/\bcos\b/g, ` ${w.cos} `)
+    .replace(/\btan\b/g, ` ${w.tan} `)
+    .replace(/(?<=[\w)²³])\s*\/\s*(?=[\w(√])/g, ` ${w.over} `)
+    .replace(/\s+[−-]\s+|(?<=[\w)°²³])[−](?=[\w(])|(?<=[\d)°²³])-(?=[\w(])/g, ` ${w.minus} `)
+    .replace(/(?<=[\w)²³])\s*\+\s*(?=[\w(√])/g, ` ${w.plus} `)
+    .replace(/(\d)\s*\(/g, `$1 ${w.times} (`)
+    .replace(/\)\s*\(/g, `) ${w.times} (`)
+    .replace(/[()]/g, " ")
+    .replace(/[₀-₉]/g, (digit) => ` ${digit.charCodeAt(0) - 0x2080}`)
+    .replace(/²/g, ` ${w.squared}`)
+    .replace(/³/g, ` ${w.cubed}`)
+    .replace(/°/g, ` ${w.degrees}`)
+    .replace(/·|×/g, ` ${w.times} `)
+    .replace(/≈/g, ` ${w.approx} `)
+    .replace(/→/g, ", ")
+    .replace(/(\d),(\d)/g, `$1 ${w.decimal} $2`)
+    .replace(/^#+\s*/gm, "")
+    .replace(/\*\*|__|`|\*/g, "")
+    .replace(/^\s*[-•]\s+/gm, "")
+    .replace(/\s*=\s*/g, ` ${w.equals} `)
+    .replace(/[ \t]+/g, " ")
+    .replace(/ +([,.;:?!])/g, "$1")
+    .replace(/,(\s*,)+/g, ",")
+    .replace(/\n\s*\n+/g, "\n")
     .trim();
+
+  return output;
 }
 
 function populateVoiceOptions() {
@@ -1882,14 +2034,14 @@ function populateVoiceOptions() {
     elements.voiceSelect.appendChild(option);
   });
 
-  if (!state.selectedVoiceName && state.voicePreference === "female") {
+  // Las voces llegan por partes (Edge carga después las voces "Natural"), así que la voz
+  // recomendada se recalcula cada vez, salvo que el estudiante haya elegido una a mano.
+  if (!state.voiceChosenByStudent) {
     const defaultLang = state.subjectMode === "languages" ? "en-US" : "es-CO";
     const preferred = pickPreferredVoice(voices, defaultLang);
-    if (preferred) {
-      state.selectedVoiceName = preferred.name;
-      elements.voiceSelect.value = preferred.name;
-    }
+    state.selectedVoiceName = preferred ? preferred.name : "";
   }
+  elements.voiceSelect.value = state.selectedVoiceName;
 }
 
 function isAllowedVoiceLanguage(voice) {
@@ -2070,76 +2222,94 @@ function getCompatibleSelectedVoice(voices, speechLang) {
   return selected;
 }
 
+// Elige la voz más natural del género del profesor. Orden: (1) idioma, (2) género correcto,
+// (3) naturalidad (voces neuronales de Edge, mejoradas de Apple, Google), (4) acento cercano.
+// Si no hay ninguna voz del género pedido, usa una de género desconocido y, en último caso, cualquiera.
 function pickPreferredVoice(voices, speechLang) {
   const langPrefix = speechLang.slice(0, 2).toLowerCase();
   const candidates = voices.filter((voice) => voice.lang.toLowerCase().startsWith(langPrefix));
   if (!candidates.length) {
-    return speechLang.toLowerCase().startsWith("es")
-      ? voices.find((voice) => voice.lang.toLowerCase().startsWith("es"))
-      : null;
+    return null;
   }
 
-  if (state.voicePreference === "female") {
-    const femaleVoice = candidates.find((voice) => isLikelyFemaleVoice(voice.name));
-    if (femaleVoice) {
-      return femaleVoice;
-    }
+  const wanted = state.voicePreference === "female" || state.voicePreference === "male" ? state.voicePreference : "";
+  const ranked = [...candidates].sort((a, b) => scoreVoice(b, speechLang) - scoreVoice(a, speechLang));
+  if (!wanted) {
+    return ranked[0];
   }
 
-  return candidates[0];
+  return (
+    ranked.find((voice) => getVoiceGender(voice) === wanted) ||
+    ranked.find((voice) => getVoiceGender(voice) === "unknown") ||
+    ranked[0]
+  );
+}
+
+function scoreVoice(voice, speechLang) {
+  const name = normalizeForVoice(voice.name);
+  const lang = voice.lang.toLowerCase().replace("_", "-");
+  let score = 0;
+  if (/\b(natural|neural)\b/.test(name)) score += 60;
+  if (/\bonline\b/.test(name)) score += 25;
+  if (/\b(premium|enhanced|mejorada|siri)\b/.test(name)) score += 45;
+  if (/\bgoogle\b/.test(name)) score += 20;
+  if (voice.localService === false) score += 5;
+  const wantedLang = speechLang.toLowerCase();
+  if (lang === wantedLang) score += 15;
+  else if (wantedLang.startsWith("es") && ["es-mx", "es-us", "es-419"].includes(lang)) score += 8;
+  else if (wantedLang.startsWith("es") && /^es-(ve|pe|ec|pa|cr|gt|hn|ni|sv|do|pr|cu|bo|py|uy|ar|cl)$/.test(lang)) score += 6;
+  return score;
 }
 
 function isVoiceCompatibleWithLanguage(voice, speechLang) {
   return voice.lang.toLowerCase().startsWith(speechLang.slice(0, 2).toLowerCase());
 }
 
-function isLikelyFemaleVoice(name) {
-  const normalized = normalizeForVoice(name);
-  return [
-    "female",
-    "woman",
-    "sabina",
-    "helena",
-    "laura",
-    "elvira",
-    "zira",
-    "aria",
-    "ana",
-    "andrea",
-    "ava",
-    "emma",
-    "libby",
-    "mia",
-    "natasha",
-    "sonia",
-    "olivia",
-    "samantha",
-    "tessa",
-    "victoria",
-    "jenny",
-    "joanna",
-    "kendra",
-    "kimberly",
-    "salli",
-    "susan",
-    "denise",
-    "gabrielle",
-    "lea",
-    "celine",
-    "chloe",
-    "aurelie",
-    "audrey",
-    "brigitte",
-    "hortense",
-    "julie",
-    "amelie",
-    "camila",
-    "paulina",
-    "monica",
-    "sofia",
-    "lucia",
-    "maria"
-  ].some((cue) => normalized.includes(cue));
+const FEMALE_VOICE_NAMES = [
+  // Español (Edge, Windows, Apple, Android)
+  "salome", "dalia", "elvira", "paloma", "ximena", "abril", "estrella", "irene", "laia", "lia", "nuria", "triana",
+  "vera", "beatriz", "candela", "carlota", "larissa", "marina", "renata", "yolanda", "elena", "catalina", "camila",
+  "paola", "andrea", "sofia", "valentina", "tania", "maria", "ramona", "marta", "karla", "margarita", "karina",
+  "lorena", "belkys", "teresa", "sabina", "helena", "laura", "paulina", "monica", "marisol", "angelica", "soledad",
+  "lucia", "isabela", "francisca", "luciana", "esperanza",
+  // Inglés
+  "aria", "ava", "emma", "jenny", "michelle", "ana", "libby", "sonia", "mia", "natasha", "olivia", "samantha",
+  "tessa", "victoria", "zira", "hazel", "susan", "joanna", "kendra", "kimberly", "salli", "karen", "moira", "fiona",
+  "allison", "serena", "nicky", "kate", "clara", "emily", "sara", "jane", "nancy", "amber", "ashley", "cora",
+  "elizabeth",
+  // Francés
+  "denise", "eloise", "vivienne", "brigitte", "celeste", "coralie", "jacqueline", "josephine", "yvette", "sylvie",
+  "ariane", "charline", "julie", "hortense", "amelie", "audrey", "aurelie", "chloe", "celine", "gabrielle", "lea",
+  "marie", "virginie"
+];
+
+const MALE_VOICE_NAMES = [
+  // Español (Edge, Windows, Apple, Android)
+  "gonzalo", "jorge", "alvaro", "raul", "pablo", "juan", "diego", "carlos", "arnau", "dario", "elias", "saul",
+  "teo", "cecilio", "gerardo", "liberto", "luciano", "pelayo", "yago", "alonso", "tomas", "lorenzo", "alex",
+  "sebastian", "luis", "marcelo", "mateo", "mario", "emilio", "andres", "federico", "roberto", "victor", "rodrigo",
+  "manuel", "javier", "enrique", "alberto", "esteban", "julian", "felipe", "miguel", "antonio", "fernando",
+  // Inglés
+  "guy", "davis", "andrew", "brian", "christopher", "eric", "roger", "steffan", "tony", "ryan", "thomas", "daniel",
+  "fred", "aaron", "arthur", "david", "mark", "james", "william", "liam", "george", "oliver", "matthew", "joey",
+  "justin", "kevin", "stephen", "rishi", "gordon", "lee", "reed", "rocko",
+  // Francés
+  "henri", "remy", "alain", "claude", "jerome", "maurice", "yves", "paul", "antoine", "jean", "nicolas", "gerard",
+  "frederic", "fabrice", "thierry", "guillaume"
+];
+
+// Devuelve "female", "male" o "unknown" a partir del nombre de la voz.
+// El navegador no informa el género, así que se deduce por nombre (palabra completa).
+function getVoiceGender(voice) {
+  const name = normalizeForVoice(voice.name);
+  const words = name.split(/[^a-z]+/).filter(Boolean);
+  if (words.includes("female") || words.includes("femenina") || words.includes("mujer")) return "female";
+  if (words.includes("male") || words.includes("masculina") || words.includes("hombre")) return "male";
+  if (words.some((word) => FEMALE_VOICE_NAMES.includes(word))) return "female";
+  if (words.some((word) => MALE_VOICE_NAMES.includes(word))) return "male";
+  // Las voces "Google español" de Chrome son femeninas.
+  if (words.includes("google") && voice.lang.toLowerCase().startsWith("es")) return "female";
+  return "unknown";
 }
 
 function countMatches(text, cues) {

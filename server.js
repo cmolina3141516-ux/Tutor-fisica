@@ -3820,6 +3820,13 @@ function loadSystemPrompt() {
   return cachedSystemPrompt;
 }
 
+// Género de la voz del profesor: "male" o "female". TUTOR_VOICE_GENDER permite fijarlo
+// por servicio (útil para nuevos profesores como Felipe o Mateo).
+function getTutorVoiceGender(defaultGender) {
+  const configured = String(process.env.TUTOR_VOICE_GENDER || "").trim().toLowerCase();
+  return configured === "male" || configured === "female" ? configured : defaultGender;
+}
+
 function buildTutorConfig() {
   const subjectMode = getSubjectMode();
   const schoolName = process.env.SCHOOL_NAME || "Virtual Planet";
@@ -3860,7 +3867,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso de matemáticas.",
       subjectMode,
-      voicePreference: "neutral",
+      voicePreference: getTutorVoiceGender("male"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Esteban. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Matemáticas.",
@@ -3904,7 +3911,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: pide explicaciones, líneas de tiempo, comparaciones históricas, quizzes o análisis social escolar.",
       subjectMode,
-      voicePreference: "female",
+      voicePreference: getTutorVoiceGender("female"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy la profesora Laura. Puedo ayudarte con explicaciones claras, análisis guiado y aclaración de dudas sobre temas de Ciencias Sociales. Este tutor trabaja solo dentro de esta asignatura.",
@@ -3948,7 +3955,7 @@ function buildTutorConfig() {
       helperText:
         "Tip: ask for conversation practice, text correction, grammar explanations, vocabulary, guided translation, pronunciation or quizzes.",
       subjectMode,
-      voicePreference: "female",
+      voicePreference: getTutorVoiceGender("female"),
       voiceLanguages: ["en", "fr", "es"],
       welcomeMessage:
         "Hello, I am Miss Emily. I can help you practice English and French with conversation, grammar, vocabulary, pronunciation, reading, writing and guided correction. I will use the language you request or imply.",
@@ -3992,7 +3999,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: pide explicaciones, problemas de química paso a paso, ideas de proyectos, quizzes, análisis de imágenes o apoyo para presentaciones.",
       subjectMode,
-      voicePreference: "neutral",
+      voicePreference: getTutorVoiceGender("male"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, resolución de problemas, proyectos transversales, presentaciones, prácticas de laboratorio y aclaración de dudas sobre Ciencias Naturales y Química. Este tutor trabaja solo dentro de estas áreas.",
@@ -4045,7 +4052,7 @@ function buildTutorConfig() {
         ? "Consejo: prueba pedir una explicación, un quiz, una gráfica o resolver un ejercicio paso a paso de física o matemáticas."
         : "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
     subjectMode,
-    voicePreference: "neutral",
+    voicePreference: getTutorVoiceGender("male"),
     voiceLanguages: ["es"],
     welcomeMessage:
       hybridPhysicsMathTutor
