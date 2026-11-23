@@ -28,7 +28,7 @@ Este archivo resume la conversación con Claude del 23 de noviembre de 2026 dond
 | Felipe | Tecnología, Programación y Robótica | (no existe aún) | pendiente |
 | Mateo | Lectura Crítica y Filosofía | (no existe aún) | pendiente |
 
-Este repositorio sirve a todos: la variable `TUTOR_SUBJECT` decide el profesor. **Confirmado (2026-11-23) en el panel de Render:** los cinco servicios despliegan desde `cmolina3141516-ux/Tutor-fisica`, rama `main`. Solo Tutor-matemáticas tiene auto-deploy; Tutor-fisica (proyecto «TUTOR FÍSICA»), Tutor-sociales, Tutor-Emily y Tutor-naturales lo tienen **apagado** y hay que desplegarlos a mano («Manual Deploy → Deploy latest commit»).
+Este repositorio sirve a todos: la variable `TUTOR_SUBJECT` decide el profesor. **Confirmado (2026-11-23) en el panel de Render:** los cinco servicios despliegan desde `cmolina3141516-ux/Tutor-fisica`, rama `main`. **Los cinco tienen auto-deploy «On Commit»** (encendido en Tutor-fisica —proyecto «TUTOR FÍSICA»—, Tutor-sociales, Tutor-Emily y Tutor-naturales el 2026-11-23): todo push a `main` se publica solo en los cinco profesores, así que a `main` solo llega código probado.
 
 El panel de venta y códigos de acceso está en el repo `innova-school-panel` (landing + admin que crea códigos en la tabla `access_codes` de Supabase; pago por Tiendanube y comprobante por WhatsApp).
 
@@ -100,6 +100,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 
 - **2026-11-23** — **Decisión de Carlos: misma estructura que Saber 11 para Innova School y el Equipo Nova.** Inicio de sesión con **Firebase Authentication**, base de datos en **Firestore** y archivos de apoyo en **Google Cloud Storage**; los servicios en **Google Cloud Run** (contenedor Docker y publicación segura como `scripts/publicar.sh` de Saber 11). Se migra desde Render + Supabase **después** de lo urgente (fusionar el PR y poner `gpt-6-luna` en Render antes del 11-dic-2026).
 - **2026-11-23** — **Decisión de Carlos: Innova School tendrá su propio proyecto de Google Cloud y Firebase, totalmente separado de Saber 11** (sin compartir datos, usuarios, archivos, facturación ni permisos con `marco-saber-11` ni `ai-studio-applet-webapp-4b83e`). El nombre del proyecto se define al crearlo (sugerido: `innova-school`).
+- **2026-11-23** — **Auto-deploy encendido (pedido de Carlos)** en Tutor-fisica, Tutor-sociales, Tutor-Emily y Tutor-naturales, con la opción «On Commit», igual que Tutor-matemáticas. Desde ahora cada push a `main` redespliega los cinco servicios (unos segundos de reinicio en plan Free), incluso si solo cambia CLAUDE.md. Lo que no esté probado se trabaja en `depuracion-equipo-nova` (que despliega a `tutor-julian-prueba`) y pasa a `main` después.
 
 ## Cómo probar sin gastar
 
