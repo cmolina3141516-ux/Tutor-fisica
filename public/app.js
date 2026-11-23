@@ -395,6 +395,24 @@ function normalizeTutorConfig(config) {
 
 async function initializeAccessGate() {
   const params = new URLSearchParams(window.location.search);
+  const novaPass = params.get("nova");
+  if (novaPass) {
+    // El pase sirve una sola vez: se quita de la dirección para que no quede en el historial.
+    params.delete("nova");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    const storedNovaSessionId = window.sessionStorage.getItem(ACCESS_SESSION_STORAGE_KEY);
+    if (storedNovaSessionId) {
+      state.accessSessionId = storedNovaSessionId;
+    }
+    const novaResult = await enterWithNovaPass(novaPass);
+    if (novaResult === true) {
+      return true;
+    }
+    showAccessGate(novaResult);
+    return false;
+  }
+
   const codeFromUrl = params.get("code") || params.get("access");
   const storedCode = window.sessionStorage.getItem(ACCESS_STORAGE_KEY);
   const storedSessionId = window.sessionStorage.getItem(ACCESS_SESSION_STORAGE_KEY);
@@ -456,6 +474,48 @@ async function validateAccessCode(rawCode, showErrors) {
       showAccessGate(error.message || "No se pudo validar el código.");
     }
     return false;
+  } finally {
+    setAccessBusy(false);
+  }
+}
+
+// Ingreso desde Nova School: devuelve true si entró, o el mensaje para el estudiante.
+async function enterWithNovaPass(pass) {
+  setAccessBusy(true);
+  try {
+    const response = await fetch("/api/access/nova", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pass,
+        session_id: state.accessSessionId
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.valid) {
+      return data.error || "No se pudo abrir tu sesión desde Nova School. Vuelve a Nova School e intenta de nuevo.";
+    }
+
+    state.accessGranted = true;
+    state.accessCode = data.code;
+    state.accessSessionId = data.sessionId || state.accessSessionId;
+    window.sessionStorage.setItem(ACCESS_STORAGE_KEY, state.accessCode);
+    if (state.accessSessionId) {
+      window.sessionStorage.setItem(ACCESS_SESSION_STORAGE_KEY, state.accessSessionId);
+    }
+    if (data.student?.name && elements.studentName) {
+      elements.studentName.value = data.student.name;
+    }
+    if (data.student?.grade && elements.gradeLevel) {
+      elements.gradeLevel.value = data.student.grade;
+    }
+    hideAccessGate();
+    setChatLocked(false);
+    return true;
+  } catch (_error) {
+    return "No se pudo abrir tu sesión desde Nova School. Vuelve a Nova School e intenta de nuevo.";
   } finally {
     setAccessBusy(false);
   }

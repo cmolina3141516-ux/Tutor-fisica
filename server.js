@@ -1,7 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { randomUUID } = require("crypto");
+const { randomUUID, createHmac, timingSafeEqual } = require("crypto");
 
 const rootDir = __dirname;
 const publicDir = path.join(rootDir, "public");
@@ -94,6 +94,22 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 400, { error: toStudentError(error, "No se pudo validar el acceso. Intenta de nuevo en unos minutos.", "acceso") });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/access/nova") {
+    try {
+      const body = await readJsonBody(req);
+      const result = await startNovaAccessSession(body.pass, body.session_id);
+      if (!result.valid) {
+        sendJson(res, 403, { error: result.error });
+        return;
+      }
+
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: toStudentError(error, "No se pudo abrir tu sesión desde Nova School. Vuelve a Nova School e intenta de nuevo.", "acceso") });
     }
     return;
   }
@@ -4212,10 +4228,162 @@ function endMemoryTutorAccessSession(rawCode, rawSessionId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Ingreso desde Nova School (pase ?nova=), sin código de acceso.
+// Nova School firma el pase con NOVA_TUTOR_SECRET (HMAC-SHA256, vence en 5 min):
+//   base64url(JSON) + "." + base64url(HMAC-SHA256(clave, parte1))
+//   JSON: { v: 1, iss: "nova-school", sub: uid, tutor: "JULIAN", grade, name, iat, exp, jti }
+// Si el pase es válido, el profesor le asigna al estudiante un código propio y estable
+// (PREFIJO-NOVA-xxxxxxxxxxxxxxxxxxxx, derivado del uid con la misma clave) y desde ahí todo funciona
+// igual que con un código normal: energía diaria, una sesión activa, registro de uso.
+// ---------------------------------------------------------------------------
+const NOVA_PASS = {
+  maxAgeSeconds: 10 * 60, // tope de vida que aceptamos aunque el pase diga otra cosa
+  clockSkewSeconds: 60,
+  codeTtlMs: Number(process.env.NOVA_CODE_TTL_MS || 12 * 60 * 60 * 1000),
+  maxSessionsPerDay: Number(process.env.NOVA_MAX_SESSIONS_PER_DAY || 10)
+};
+const novaUsedPasses = new Map(); // jti -> exp (segundos), para que un pase sirva una sola vez
+const novaMemoryCodes = new Map(); // código Nova -> vence (ms), solo sin Supabase
+const NOVA_PASS_ERROR = "Este enlace de Nova School ya venció o no es válido. Vuelve a Nova School y abre de nuevo a tu profesor.";
+
+function getNovaSecret() {
+  const secret = String(process.env.NOVA_TUTOR_SECRET || "");
+  return secret.length >= 32 ? secret : "";
+}
+
+function verifyNovaPass(rawPass) {
+  const secret = getNovaSecret();
+  if (!secret) {
+    console.error("[error acceso] Pase de Nova School recibido, pero falta NOVA_TUTOR_SECRET (mínimo 32 caracteres).");
+    return { valid: false, error: "El ingreso desde Nova School no está disponible en este momento. Intenta más tarde." };
+  }
+
+  const pass = String(rawPass || "").trim();
+  const parts = pass.split(".");
+  if (pass.length > 2000 || parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { valid: false, error: NOVA_PASS_ERROR };
+  }
+
+  const expected = createHmac("sha256", secret).update(parts[0]).digest();
+  const received = Buffer.from(parts[1], "base64url");
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    console.warn("[acceso nova] Firma inválida.");
+    return { valid: false, error: NOVA_PASS_ERROR };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+  } catch (_error) {
+    return { valid: false, error: NOVA_PASS_ERROR };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const iat = Number(payload?.iat);
+  const exp = Number(payload?.exp);
+  const sub = String(payload?.sub || "");
+  const jti = String(payload?.jti || "");
+  const tutor = normalizeAccessCode(payload?.tutor);
+  if (
+    payload?.v !== 1 ||
+    payload?.iss !== "nova-school" ||
+    !sub || sub.length > 128 ||
+    !jti || jti.length > 64 ||
+    !Number.isFinite(iat) || !Number.isFinite(exp) ||
+    iat > now + NOVA_PASS.clockSkewSeconds ||
+    exp < now ||
+    exp - iat > NOVA_PASS.maxAgeSeconds
+  ) {
+    console.warn("[acceso nova] Pase vencido o mal formado.");
+    return { valid: false, error: NOVA_PASS_ERROR };
+  }
+
+  const expectedPrefix = getTutorAccessPrefix();
+  if (tutor !== expectedPrefix) {
+    console.warn(`[acceso nova] Pase para ${tutor}, este profesor es ${expectedPrefix}.`);
+    return { valid: false, error: "Este enlace es para otro profesor. Vuelve a Nova School y elige de nuevo." };
+  }
+
+  for (const [usedJti, usedExp] of novaUsedPasses) {
+    if (usedExp < now) {
+      novaUsedPasses.delete(usedJti);
+    }
+  }
+  if (novaUsedPasses.has(jti)) {
+    console.warn("[acceso nova] Pase ya usado.");
+    return { valid: false, error: NOVA_PASS_ERROR };
+  }
+  novaUsedPasses.set(jti, exp);
+
+  const grade = ["6", "7", "8", "9", "10", "11"].includes(String(payload?.grade)) ? String(payload.grade) : "";
+  const name = String(payload?.name || "").trim().split(/\s+/)[0].slice(0, 40);
+  return { valid: true, sub, grade, name, tutorPrefix: expectedPrefix };
+}
+
+function buildNovaAccessCode(sub) {
+  const hash = createHmac("sha256", getNovaSecret()).update(`nova-uid:${sub}`).digest("hex").slice(0, 20).toUpperCase();
+  return `${getTutorAccessPrefix()}-NOVA-${hash}`;
+}
+
+async function startNovaAccessSession(rawPass, rawSessionId) {
+  const pass = verifyNovaPass(rawPass);
+  if (!pass.valid) {
+    return pass;
+  }
+
+  const code = buildNovaAccessCode(pass.sub);
+  const expiresAt = new Date(Date.now() + NOVA_PASS.codeTtlMs);
+  if (isSupabaseConfigured()) {
+    // Fila propia en access_codes (sin correo ni apellidos). No toca is_active: si Carlos desactiva
+    // el código, sigue desactivado.
+    await supabaseRequest("access_codes?on_conflict=code", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates",
+      body: {
+        code,
+        tutor_prefix: pass.tutorPrefix,
+        student_name: pass.name || null,
+        grade: pass.grade || null,
+        expires_at: expiresAt.toISOString(),
+        max_sessions_per_day: NOVA_PASS.maxSessionsPerDay,
+        notes: "Nova School"
+      }
+    });
+    // Un pase nuevo gana: cierra la sesión anterior del mismo estudiante (como en Nova School).
+    await supabaseRequest(`access_sessions?code=eq.${encodeURIComponent(code)}&is_active=eq.true`, {
+      method: "PATCH",
+      body: { is_active: false, ended_at: new Date().toISOString() }
+    });
+  } else {
+    novaMemoryCodes.set(code, expiresAt.getTime());
+    const record = getAccessUsageRecord(code);
+    record.activeSessionId = "";
+    record.activeUntil = 0;
+  }
+
+  const result = await startTutorAccessSession(code, rawSessionId);
+  if (!result.valid) {
+    return result;
+  }
+
+  console.log(`[acceso nova] Ingreso desde Nova School a ${pass.tutorPrefix}.`);
+  return { ...result, student: { name: pass.name, grade: pass.grade } };
+}
+
 function validateTutorAccessCode(rawCode) {
   const code = normalizeAccessCode(rawCode);
   if (!code) {
     return { valid: false, error: "Escribe tu código de acceso." };
+  }
+
+  const novaExpiresAt = novaMemoryCodes.get(code);
+  if (novaExpiresAt) {
+    if (novaExpiresAt < Date.now()) {
+      novaMemoryCodes.delete(code);
+      return { valid: false, error: "Tu ingreso desde Nova School venció. Vuelve a Nova School y abre de nuevo a tu profesor." };
+    }
+    return { valid: true, code, tutorPrefix: getTutorAccessPrefix() };
   }
 
   const expectedPrefix = getTutorAccessPrefix();
