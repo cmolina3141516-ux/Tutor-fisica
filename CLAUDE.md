@@ -68,7 +68,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 3. ~~Ejecutar `supabase-schema.sql` en Supabase para crear `tutor_usage_log`.~~ Hecho el 2026-11-23.
 4. Crear un servicio de prueba en Render desde la rama, validar y fusionar el PR.
 5. Crear a Felipe y Mateo (nuevos `TUTOR_SUBJECT` y archivos en `prompts/`).
-6. En `innova-school-panel`: el código trae `ADMIN_PASSCODE` por defecto `INNOVA2026` y el repo es público. Verificar que Render tenga una clave propia configurada.
+6. En `innova-school-panel`: Render ya tiene una clave propia (verificado el 2026-11-23). Pendiente: rotarla por una larga y aleatoria (la pone Carlos) y agregar límite de intentos al panel.
 7. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
 
 ## Registro de decisiones
@@ -102,6 +102,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 - **2026-11-23** — **Decisión de Carlos: Innova School tendrá su propio proyecto de Google Cloud y Firebase, totalmente separado de Saber 11** (sin compartir datos, usuarios, archivos, facturación ni permisos con `marco-saber-11` ni `ai-studio-applet-webapp-4b83e`). El nombre del proyecto se define al crearlo (sugerido: `innova-school`).
 - **2026-11-23** — **Auto-deploy encendido (pedido de Carlos)** en Tutor-fisica, Tutor-sociales, Tutor-Emily y Tutor-naturales, con la opción «On Commit», igual que Tutor-matemáticas. Desde ahora cada push a `main` redespliega los cinco servicios (unos segundos de reinicio en plan Free), incluso si solo cambia CLAUDE.md. Lo que no esté probado se trabaja en `depuracion-equipo-nova` (que despliega a `tutor-julian-prueba`) y pasa a `main` después.
 - **2026-11-23** — **`supabase-schema.sql` ejecutado** (pedido de Carlos) en el proyecto de Supabase `innova-school-tutores` (organización «TUTORES INNOVA SCHOOL I.A.», plan Free, ref `qfrribywlrgxznlklovz`), único proyecto de esa organización y el que usan los tutores y el panel. Resultado «Success». Verificado: `access_codes` (11 columnas), `access_sessions` (6), `access_usage` (4) y la nueva `tutor_usage_log` (13, las mismas que escribe `logTokenUsage` en `server.js`), las cuatro con RLS activo. Activar RLS no afecta a nadie porque los tutores y `innova-school-panel` usan la clave `service_role`, que no está sujeta a RLS. Desde ahora cada respuesta de un profesor queda registrada con tokens y costo; la consulta de costo por tutor y por día está al final del archivo SQL.
+- **2026-11-23** — Revisado `ADMIN_PASSCODE` del servicio `innova-school-panel` en Render: está definida y no es el valor por defecto del código. Recomendado: rotarla por una clave larga y aleatoria desde un gestor de contraseñas (la pone Carlos) y agregar un límite de intentos fallidos al panel. El valor nunca se escribe en el repo ni en el chat.
 
 ## Cómo probar sin gastar
 
