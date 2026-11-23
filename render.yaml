@@ -10,7 +10,7 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
-        value: gpt-5-mini
+        value: gpt-6-luna
       - key: SCHOOL_NAME
         value: Virtual Planet
       - key: TUTOR_NAME

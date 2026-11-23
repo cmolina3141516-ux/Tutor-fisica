@@ -20,10 +20,10 @@ const COST_CONTROL = {
   maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 2500),
   maxQuizOutputTokens: Number(process.env.OPENAI_MAX_QUIZ_OUTPUT_TOKENS || 5000),
   reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "low",
-  // Precios por millón de tokens (gpt-5-mini por defecto). Solo se usan para estimar el costo en el registro.
-  priceInput: Number(process.env.PRICE_INPUT_PER_M || 0.25),
-  priceCachedInput: Number(process.env.PRICE_CACHED_INPUT_PER_M || 0.025),
-  priceOutput: Number(process.env.PRICE_OUTPUT_PER_M || 2)
+  // Precios por millón de tokens (gpt-6-luna por defecto). Solo se usan para estimar el costo en el registro.
+  priceInput: Number(process.env.PRICE_INPUT_PER_M || 0.1),
+  priceCachedInput: Number(process.env.PRICE_CACHED_INPUT_PER_M || 0.01),
+  priceOutput: Number(process.env.PRICE_OUTPUT_PER_M || 0.5)
 };
 
 // "Energía": cada acción descuenta unidades del cupo diario del código (columna max_messages_per_day).
@@ -77,8 +77,7 @@ const server = http.createServer(async (req, res) => {
         ...tutorConfig
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo construir la configuración del tutor.";
-      sendJson(res, 500, { error: message });
+      sendJson(res, 500, { error: toStudentError(error, "No se pudo cargar el tutor. Intenta de nuevo en unos minutos.", "config") });
     }
     return;
   }
@@ -94,8 +93,7 @@ const server = http.createServer(async (req, res) => {
 
       sendJson(res, 200, result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo validar el acceso.";
-      sendJson(res, 400, { error: message });
+      sendJson(res, 400, { error: toStudentError(error, "No se pudo validar el acceso. Intenta de nuevo en unos minutos.", "acceso") });
     }
     return;
   }
@@ -239,8 +237,7 @@ const server = http.createServer(async (req, res) => {
       }
       sendJson(res, 200, result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Error inesperado.";
-      sendJson(res, 500, { error: message });
+      sendJson(res, 500, { error: toStudentError(error, "El profesor no pudo responder en este momento. Intenta de nuevo en unos segundos.", "chat") });
     }
     return;
   }
@@ -462,7 +459,7 @@ async function generateTutorReply(payload) {
   ];
 
   const response = await callOpenAIResponses(apiKey, {
-    model: process.env.OPENAI_MODEL || "gpt-5-mini",
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
     input,
     reasoning: {
       effort: COST_CONTROL.reasoningEffort
@@ -998,7 +995,7 @@ async function inferMathDiagramFromLatestImage({ apiKey, latestUserTurn, userMes
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        model: process.env.OPENAI_MODEL || "gpt-6-luna",
         reasoning: { effort: "low" },
         text: { verbosity: "low" },
         input: [
@@ -1122,7 +1119,7 @@ async function tryGenerateUniversalMathGraphAnswer({ apiKey, prompt }) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        model: process.env.OPENAI_MODEL || "gpt-6-luna",
         reasoning: { effort: "low" },
         text: { verbosity: "low" },
         input: [
@@ -3552,7 +3549,7 @@ function logTokenUsage({ data, access, helpMode, isQuizMode, hadAttachment, impa
   const record = {
     code: normalizeAccessCode(access?.code) || null,
     tutor_prefix: getTutorAccessPrefix(),
-    model: String(data?.model || process.env.OPENAI_MODEL || "gpt-5-mini"),
+    model: String(data?.model || process.env.OPENAI_MODEL || "gpt-6-luna"),
     help_mode: isQuizMode ? "quiz" : helpMode,
     had_attachment: Boolean(hadAttachment),
     impatience: Boolean(impatienceDetected),
@@ -3740,6 +3737,22 @@ function sendSvg(res, markup) {
   res.end(markup);
 }
 
+// Errores que el estudiante puede ver. Todo lo demás (OpenAI, Supabase, clave, cuota,
+// facturación, costos) se queda en la consola del servidor y nunca llega al navegador.
+function createStudentError(message) {
+  const error = new Error(message);
+  error.studentFacing = true;
+  return error;
+}
+
+function toStudentError(error, fallbackMessage, context) {
+  if (error && error.studentFacing) {
+    return error.message;
+  }
+  console.error(`[error ${context}]`, error instanceof Error ? error.message : error);
+  return fallbackMessage;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
@@ -3747,14 +3760,14 @@ function readJsonBody(req) {
       raw += chunk;
       // Margen para un archivo de 5 MB codificado en base64 (+37 %) más el historial.
       if (raw.length > 8_000_000) {
-        reject(new Error("El archivo es demasiado grande. El máximo es 5 MB."));
+        reject(createStudentError("El archivo es demasiado grande. El máximo es 5 MB."));
       }
     });
     req.on("end", () => {
       try {
         resolve(raw ? JSON.parse(raw) : {});
       } catch (error) {
-        reject(new Error("JSON invalido en la solicitud."));
+        reject(createStudentError("Solicitud inválida."));
       }
     });
     req.on("error", reject);

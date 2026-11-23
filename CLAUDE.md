@@ -2,6 +2,8 @@
 
 Este archivo resume la conversación con Claude del 23 de noviembre de 2026 donde se tomaron las decisiones de producto y se depuraron los tutores. Léelo antes de trabajar en este repositorio. Responde siempre en español a Carlos ("Caliche"), fundador y CEO de Virtual Planet S.A.S., profesor de física y matemáticas.
 
+**Regla de trabajo:** toda decisión que se tome (de producto, pedagogía, técnica, costos o configuración) se anota en este archivo, en la sección correspondiente o en el «Registro de decisiones» al final, con su fecha.
+
 ## Visión de producto (decisiones tomadas)
 
 - **Innova School**: colegio virtual de 6° a 11° con IA. Es la marca principal y la visión original. Estructura de contenido por **nodos de conocimiento** interdisciplinarios. Requiere licencia de funcionamiento o alianza con un colegio aprobado para certificar (pendiente de definir).
@@ -40,14 +42,14 @@ Decidido porque los estudiantes quieren respuestas rápidas y, si solo reciben p
 
 ## Control de costos (implementado)
 
-Modelo actual `gpt-5-mini` (US$0,25 entrada / US$0,025 entrada en caché / US$2 salida por millón). Estimación: ~US$2,8/estudiante/mes antes de optimizar, ~US$0,70 después (30 mensajes/día, 20 días). Medidas:
+Modelo actual **`gpt-6-luna`** (US$0,10 entrada / US$0,01 entrada en caché / US$0,50 salida por millón), elegido el 2026-11-23 (ver registro). Estimación: ~US$0,10–0,20/estudiante/mes (30 mensajes/día, 20 días). Con el anterior `gpt-5-mini` era ~US$2,8 antes de optimizar y ~US$0,70 después. Medidas:
 
 - Instrucciones fijas primero (idénticas en cada mensaje) → caché de OpenAI, más `prompt_cache_key` por asignatura. El contexto del turno va en un mensaje `developer` justo antes del mensaje actual.
 - Historial: últimos 8 mensajes recortados a 1.500 caracteres; adjuntos solo en el turno actual.
 - `max_output_tokens` 2500 (quiz 5000).
 - **Energía diaria** = columna `max_messages_per_day`: texto 1, con archivo 4, imagen generada +8. Gráficas SVG gratis.
 - Registro de tokens y costo por respuesta: logs `[uso] {...}` y tabla `tutor_usage_log` (en `supabase-schema.sql`).
-- La versión `gpt-5-mini-2025-08-07` aparece como obsoleta en la documentación de OpenAI: probar un reemplazo.
+- Los precios por defecto en `server.js` (`PRICE_*_PER_M`) son los de `gpt-6-luna`. Si se cambia de modelo, cambiar también esos precios.
 
 ## Subidas permitidas
 
@@ -67,6 +69,20 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 5. Crear a Felipe y Mateo (nuevos `TUTOR_SUBJECT` y archivos en `prompts/`).
 6. En `innova-school-panel`: el código trae `ADMIN_PASSCODE` por defecto `INNOVA2026` y el repo es público. Verificar que Render tenga una clave propia configurada.
 7. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
+
+## Registro de decisiones
+
+- **2026-11-23** — Toda decisión se anota en CLAUDE.md (pedido de Carlos).
+- **2026-11-23** — Prueba local de Julián (paso 1): `.env` local (en `.gitignore`, nunca se sube) con `TUTOR_SUBJECT=physics`, `SCHOOL_NAME=Innova School`, puerto 8787, sin Supabase (acceso en memoria). Código de prueba fijo `JULIAN-PRUE-BA01-20261231` vía `ACCESS_CODES`. Límites subidos solo para pruebas: 200 de energía y 20 sesiones por día (producción sigue en 30 mensajes/día).
+- **2026-11-23** — La clave de OpenAI la pega Carlos directamente en `.env`; no se escribe en el chat.
+- **2026-11-23** — Para pruebas se usa una clave nueva de OpenAI llamada **«API de pruebas innova school»**, separada de la de producción en Render. Sirve para todas las pruebas (todos los profesores y funciones), no solo para Julián. Recomendado: crearla dentro de un proyecto propio de OpenAI con tope mensual de gasto.
+- **2026-11-23** — El servidor local se arranca desde Claude Code con la configuración `julian` de `.claude/launch.json` (`npm start`, puerto 8787). Primera prueba real OK: modo rápido, ~2.100 tokens de entrada, 301 de salida, US$0,0011 por respuesta. OpenAI resolvió `gpt-5-mini` a `gpt-5-mini-2025-08-07` (la versión marcada como obsoleta).
+- **2026-11-23** — **Regla: el estudiante jamás ve costos**, tokens, cuota, facturación ni errores internos (OpenAI, Supabase, clave). El registro `[uso]` va solo a la consola del servidor y a `tutor_usage_log` (con RLS). Los errores al navegador pasan por `toStudentError()` en `server.js`: el estudiante ve un mensaje genérico y el detalle queda en la consola como `[error chat|acceso|config]`. Solo se muestran tal cual los errores creados con `createStudentError()`.
+- **2026-11-23** — **Urgente:** OpenAI apaga `gpt-5-mini` y `gpt-5-mini-2025-08-07` (y `gpt-5-nano`) el **11 de diciembre de 2026**. Producción en Render usa `gpt-5-mini` y dejará de responder ese día si no se cambia `OPENAI_MODEL`. Reemplazo oficial sugerido: `gpt-6.1-terra`. Precios por millón (entrada / caché / salida): `gpt-5-mini` 0,25/0,025/2; `gpt-6-luna` 0,10/0,01/0,50; `gpt-5.6-luna` 0,20/0,02/1,20; `gpt-5.4-mini` 0,75/0,075/4,50 (no está en la lista de retiro); `gpt-6.1-terra` 1/0,05/5. Modelo elegido: pendiente de prueba comparativa.
+- **2026-11-23** — Prueba comparativa `gpt-6-luna` vs `gpt-6.1-terra` con Julián (8 casos: concepto, pregunta trampa, plano inclinado con fricción, guiado, revisar texto, impaciencia, revisar foto). Ambos funcionan sin cambios en el código (Responses API, `reasoning.effort`, imágenes y caché). **Física correcta en los dos.** Costo por mensaje: luna ~US$0,0001–0,0004; terra ~US$0,0006–0,004 (unas 10 veces más). Tiempo: luna 3–5 s, terra 4–7 s. Diferencia: en «Revisa mi respuesta» luna daba el resultado final y terra solo la pista. Se precisó la regla en `prompts/core.md` (no escribir el resultado final al revisar; cerrar pidiendo corregir) y luna pasó a cumplirla. Observación: la caché de OpenAI solo se activó en algunos mensajes (depende de OpenAI con poco tráfico; el prompt del sistema es idéntico en los tres modos).
+- **2026-11-23** — `.env` local cambiado a `gpt-6-luna` (con sus precios `PRICE_*`) para que Carlos lo pruebe. Producción y `render.yaml` siguen en `gpt-5-mini` hasta que Carlos decida.
+- **2026-11-23** — **Decisión de Carlos: el Equipo Nova usa `gpt-6-luna`.** Cambiado el modelo por defecto en `server.js`, los precios por defecto (0,10/0,01/0,50), `render.yaml` y todos los `.env.*.example`. Verificado localmente. **Falta en Render:** cambiar `OPENAI_MODEL=gpt-6-luna` en cada servicio (tutor-fisica, tutor-matematicas, tutor-ciencias, tutor-sociales, tutor-emily) **antes del 11-dic-2026**; si un servicio tiene `PRICE_*` definidos, actualizarlos o borrarlos. Ojo: `render.yaml` dice `rootDir: embed`, carpeta que no existe en este repo; otra señal de que hay que confirmar desde dónde despliega cada servicio.
+- **2026-11-23** — Repos locales revisados: solo `tutor-fisica` sirve al Equipo Nova. `tutor-saber11`, `mi-replica` (plataforma-saber11) y `anuncio-marco` son otros productos y no se tocan con cambios del Equipo Nova.
 
 ## Cómo probar sin gastar
 
