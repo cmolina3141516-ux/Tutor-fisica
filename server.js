@@ -5,11 +5,43 @@ const { randomUUID } = require("crypto");
 
 const rootDir = __dirname;
 const publicDir = path.join(rootDir, "public");
-const systemPromptPath = path.join(rootDir, "..", "agent", "tutor-fisica-system-prompt.md");
+const promptsDir = path.join(rootDir, "prompts");
 const envPath = path.join(rootDir, ".env");
 const port = Number(process.env.PORT || 8787);
 
 loadEnv(envPath);
+
+const OPENAI_API_BASE = String(process.env.OPENAI_API_BASE || "https://api.openai.com/v1").replace(/\/+$/, "");
+
+// Control de costos (ver README, sección "Control de costos").
+const COST_CONTROL = {
+  historyMessages: Number(process.env.HISTORY_MAX_MESSAGES || 8),
+  historyMessageChars: Number(process.env.HISTORY_MAX_CHARS || 1500),
+  maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 2500),
+  maxQuizOutputTokens: Number(process.env.OPENAI_MAX_QUIZ_OUTPUT_TOKENS || 5000),
+  reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium",
+  // Precios por millón de tokens (gpt-6-luna por defecto). Solo se usan para estimar el costo en el registro.
+  priceInput: Number(process.env.PRICE_INPUT_PER_M || 0.1),
+  priceCachedInput: Number(process.env.PRICE_CACHED_INPUT_PER_M || 0.01),
+  priceOutput: Number(process.env.PRICE_OUTPUT_PER_M || 0.5)
+};
+
+// "Energía": cada acción descuenta unidades del cupo diario del código (columna max_messages_per_day).
+const ENERGY_COST = {
+  message: 1,
+  attachment: Number(process.env.ENERGY_COST_ATTACHMENT || 3),
+  generatedImage: Number(process.env.ENERGY_COST_GENERATED_IMAGE || 8)
+};
+
+// Subidas permitidas: una por mensaje, imagen, PDF o Word.
+const UPLOAD_LIMITS = {
+  maxFiles: 1,
+  maxBytes: Number(process.env.UPLOAD_MAX_BYTES || 5 * 1024 * 1024),
+  maxPdfPages: Number(process.env.UPLOAD_MAX_PDF_PAGES || 3),
+  maxDocxChars: Number(process.env.UPLOAD_MAX_DOCX_CHARS || 12000)
+};
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const HELP_MODES = ["rapido", "guiado", "revisar"];
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -45,8 +77,7 @@ const server = http.createServer(async (req, res) => {
         ...tutorConfig
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo construir la configuración del tutor.";
-      sendJson(res, 500, { error: message });
+      sendJson(res, 500, { error: toStudentError(error, "No se pudo cargar el tutor. Intenta de nuevo en unos minutos.", "config") });
     }
     return;
   }
@@ -62,8 +93,7 @@ const server = http.createServer(async (req, res) => {
 
       sendJson(res, 200, result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo validar el acceso.";
-      sendJson(res, 400, { error: message });
+      sendJson(res, 400, { error: toStudentError(error, "No se pudo validar el acceso. Intenta de nuevo en unos minutos.", "acceso") });
     }
     return;
   }
@@ -184,17 +214,30 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/chat") {
     try {
       const body = await readJsonBody(req);
-      const accessResult = await registerAccessMessage(body.access);
+      body.messages = sanitizeHistory(body.messages);
+      const uploadCheck = validateLatestAttachments(body.messages);
+      if (!uploadCheck.valid) {
+        sendJson(res, 400, { error: uploadCheck.error });
+        return;
+      }
+
+      const energyUnits = ENERGY_COST.message + (uploadCheck.count ? ENERGY_COST.attachment : 0);
+      const accessResult = await registerAccessMessage(body.access, energyUnits);
       if (!accessResult.valid) {
         sendJson(res, 403, { error: accessResult.error });
         return;
       }
 
       const result = await generateTutorReply(body);
+      if (result.chargeGeneratedImage) {
+        delete result.chargeGeneratedImage;
+        chargeExtraEnergy(body.access, ENERGY_COST.generatedImage).catch((error) =>
+          console.warn("No se pudo descontar la energía de la imagen:", getErrorText(error))
+        );
+      }
       sendJson(res, 200, result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Error inesperado.";
-      sendJson(res, 500, { error: message });
+      sendJson(res, 500, { error: toStudentError(error, "El profesor no pudo responder en este momento. Intenta de nuevo en unos segundos.", "chat") });
     }
     return;
   }
@@ -227,9 +270,9 @@ async function generateTutorReply(payload) {
   const latestUserTurn = getLatestUserTurn(history);
   const latestUserMessage = getLatestUserMessage(history);
   const effectiveUserMessage = resolveEffectiveUserMessage(history);
-  const conversationMemory = buildConversationMemory(history);
+  const helpMode = normalizeHelpMode(payload.session?.help_mode);
+  const impatienceDetected = detectImpatience(latestUserMessage);
   const isQuizMode =
-    payload.session?.mode === "quiz" ||
     shouldStartQuizFromMessage({
       history,
       message: effectiveUserMessage
@@ -268,6 +311,23 @@ async function generateTutorReply(payload) {
     };
   }
   if (
+    helpMode === "revisar" &&
+    !isQuizMode &&
+    !hasLatestAttachments &&
+    String(latestUserMessage || "").trim().length < 25
+  ) {
+    // Sin trabajo que revisar: respuesta fija, sin llamar al modelo.
+    return {
+      type: "text",
+      reply: buildReviewRequestReply(subjectMode)
+    };
+  }
+  // Pedir aclaración quedó desactivado por defecto: una respuesta que solo pregunta frustra al estudiante.
+  // Se puede reactivar con ASK_CLARIFICATION=on (solo aplica al modo guiado).
+  if (
+    process.env.ASK_CLARIFICATION === "on" &&
+    helpMode === "guiado" &&
+    !impatienceDetected &&
     !isQuizMode &&
     !hasLatestAttachments &&
     shouldAskForClarification({
@@ -344,55 +404,71 @@ async function generateTutorReply(payload) {
     });
   }
 
-  const systemText = isQuizMode
-    ? `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nInstrucciones especiales para quiz:\nDevuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}\n\nReglas:\n- Crea exactamente 5 preguntas de opción múltiple para marcar en pantalla.\n- Usa 4 opciones por pregunta.\n- correctIndex debe ser un entero entre 0 y 3.\n- El nivel debe ajustarse al grado indicado.\n- Las preguntas deben ser cortas, claras y centradas en el tema conversado o solicitado.\n- Las explicaciones de cada respuesta correcta deben ser breves, útiles y aptas para discusión posterior.\n- El closing debe invitar explícitamente a discutir las respuestas y explicar las correctas, por ejemplo: \"Si quieres, discutimos tus respuestas una por una y repasamos por qué cada opción correcta es la adecuada.\"\n- ${buildQuizLanguageInstruction({ subjectMode, message: effectiveUserMessage })}`
-    : `${systemPrompt}\n\nContexto actual de la sesion:\n${studentContext}\n\n${gradeAdaptationInstructions}\n\nMemoria reciente de la conversación:\n${conversationMemory}\n\nRegla de continuidad:\n- Mantén el hilo de la conversación y responde teniendo en cuenta propuestas, comparaciones, ejemplos o tareas sugeridas en mensajes anteriores.\n- Si el estudiante usa referencias breves como "hazlo", "continua", "dibujalas", "compáralas", "eso" o "como dijiste", interpreta esa instrucción usando la memoria reciente y no la tomes como una consulta aislada.\n- No comiences las respuestas con el encabezado literal "Idea clave" salvo que el estudiante lo pida de forma expresa.\n- Si el estudiante pide una imagen o diagrama, no afirmes que la interfaz no puede generarlo: esta app sí puede mostrar imágenes y diagramas.\n- Después de explicar un tema, resolver una duda o desarrollar un ejemplo, cierra con una invitación breve y amable a hacer un quiz rápido de opción múltiple sobre ese mismo tema. No generes el quiz todavía salvo que el estudiante lo pida o acepte.${buildAttachmentPriorityInstructions({
-        hasLatestAttachments,
-        hasLatestImageAttachment,
-        hasLatestPdfAttachment
-      })}`;
+  // 1) Instrucciones fijas (idénticas en cada mensaje -> caché de OpenAI).
+  // 2) Historial corto.  3) Contexto dinámico del turno.  4) Mensaje actual.
+  const turnContext = buildTurnContext({
+    studentContext,
+    gradeAdaptationInstructions,
+    helpMode,
+    subjectMode,
+    impatienceDetected,
+    isQuizMode,
+    effectiveUserMessage,
+    attachmentInstructions: buildAttachmentPriorityInstructions({
+      hasLatestAttachments,
+      hasLatestImageAttachment,
+      hasLatestPdfAttachment
+    })
+  });
+  const previousMessages = history.slice(0, -1);
+  const toInputMessage = (message) => {
+    const isAssistant = message.role === "assistant";
+    return {
+      role: isAssistant ? "assistant" : "user",
+      content: isAssistant
+        ? [
+            {
+              type: "output_text",
+              text: String(message.content || "")
+            }
+          ]
+        : buildUserContent(message)
+    };
+  };
   const input = [
     {
       role: "system",
       content: [
         {
           type: "input_text",
-          text: systemText
+          text: systemPrompt
         }
       ]
     },
-    ...history.map((message) => {
-      const isAssistant = message.role === "assistant";
-      return {
-        role: isAssistant ? "assistant" : "user",
-        content: isAssistant
-          ? [
-              {
-                type: "output_text",
-                text: String(message.content || "")
-              }
-            ]
-          : buildUserContent(message)
-      };
-    })
+    ...previousMessages.map(toInputMessage),
+    {
+      role: "developer",
+      content: [
+        {
+          type: "input_text",
+          text: turnContext
+        }
+      ]
+    },
+    ...(latestUserTurn ? [toInputMessage(latestUserTurn)] : [])
   ];
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
+  const response = await callOpenAIResponses(apiKey, {
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    input,
+    reasoning: {
+      effort: COST_CONTROL.reasoningEffort
     },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-5-mini",
-      input,
-      reasoning: {
-        effort: "low"
-      },
-      text: {
-        verbosity: "low"
-      }
-    })
+    text: {
+      verbosity: "low"
+    },
+    max_output_tokens: isQuizMode ? COST_CONTROL.maxQuizOutputTokens : COST_CONTROL.maxOutputTokens,
+    prompt_cache_key: `innova-${subjectMode}`
   });
 
   if (!response.ok) {
@@ -401,6 +477,14 @@ async function generateTutorReply(payload) {
   }
 
   const data = await response.json();
+  logTokenUsage({
+    data,
+    access: payload.access,
+    helpMode,
+    isQuizMode,
+    hadAttachment: hasLatestAttachments,
+    impatienceDetected
+  });
   const reply = extractOutputText(data);
   const images = dedupeGeneratedImages(extractGeneratedImages(data));
   if (!reply) {
@@ -409,6 +493,15 @@ async function generateTutorReply(payload) {
         type: "image",
         reply: "Aqui tienes la imagen solicitada.",
         images
+      };
+    }
+    if (data.status === "incomplete") {
+      return {
+        type: "text",
+        reply:
+          subjectMode === "languages"
+            ? "That question needs a long answer. Could you ask about one specific part first?"
+            : "Esa pregunta necesita una respuesta muy larga. ¿Me preguntas primero por una parte específica?"
       };
     }
     throw new Error("La API no devolvio texto util.");
@@ -520,7 +613,7 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLe
   const visualPrompt = buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel });
 
   try {
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
+    const response = await fetch(`${OPENAI_API_BASE}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -552,6 +645,7 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLe
 
     return {
       type: "image",
+      chargeGeneratedImage: true,
       reply: `Aquí tienes una imagen educativa clara sobre ${subjectLabel}.`,
       images: [
         {
@@ -575,7 +669,7 @@ function getSubjectLabel(subjectMode) {
         ? "Ciencias Naturales y Química"
         : subjectMode === "languages"
           ? "Inglés y Francés"
-        : "Física";
+        : "Física y Matemáticas";
 }
 
 function buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel }) {
@@ -894,14 +988,14 @@ async function inferMathDiagramFromLatestImage({ apiKey, latestUserTurn, userMes
     "No agregues texto fuera del JSON. Si no es seguro, usa kind=unknown.";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch(`${OPENAI_API_BASE}/responses`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        model: process.env.OPENAI_MODEL || "gpt-6-luna",
         reasoning: { effort: "low" },
         text: { verbosity: "low" },
         input: [
@@ -1018,14 +1112,14 @@ async function tryGenerateUniversalMathGraphAnswer({ apiKey, prompt }) {
     "Si pide comparación o transformación, incluye varias series. No inventes texto fuera del JSON.";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch(`${OPENAI_API_BASE}/responses`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
+        model: process.env.OPENAI_MODEL || "gpt-6-luna",
         reasoning: { effort: "low" },
         text: { verbosity: "low" },
         input: [
@@ -2265,26 +2359,6 @@ function formatTick(value) {
   return String(rounded);
 }
 
-function buildConversationMemory(history) {
-  if (!Array.isArray(history) || history.length === 0) {
-    return "No hay turnos previos relevantes.";
-  }
-
-  const recentTurns = history
-    .slice(-8)
-    .map((message) => {
-      const role = message?.role === "assistant" ? "Profesor" : "Estudiante";
-      const text = String(message?.content || "").replace(/\s+/g, " ").trim();
-      if (!text) {
-        return null;
-      }
-      return `- ${role}: ${text}`;
-    })
-    .filter(Boolean);
-
-  return recentTurns.length ? recentTurns.join("\n") : "No hay turnos previos relevantes.";
-}
-
 function getLatestAssistantMessage(history) {
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const message = history[index];
@@ -2541,7 +2615,6 @@ function buildStudentContext(session) {
     `Tema: ${session.topic || defaultTopic}`,
     `Objetivo: ${session.learning_goal || "Comprender el tema consultado"}`,
     `Dificultad: ${session.difficulty || "media"}`,
-    `Modo: ${session.mode || "explicar"}`,
     `Idioma: ${session.language || "es"}`
   ];
 
@@ -2641,6 +2714,18 @@ function buildUserContent(message) {
         type: "input_file",
         filename: String(attachment.name || "documento.pdf"),
         file_data: extractBase64Payload(attachment.dataUrl)
+      });
+      continue;
+    }
+
+    if (attachment.mimeType === DOCX_MIME) {
+      // El modelo no lee Word: enviamos solo el texto extraído (muy barato).
+      const docxText = extractDocxText(Buffer.from(extractBase64Payload(attachment.dataUrl), "base64"));
+      content.push({
+        type: "input_text",
+        text: docxText
+          ? `Contenido del documento Word adjunto (${String(attachment.name || "documento.docx")}):\n${docxText.slice(0, UPLOAD_LIMITS.maxDocxChars)}`
+          : "El estudiante adjuntó un documento Word, pero no se pudo leer su texto. Pídele que lo envíe como PDF o foto."
       });
     }
   }
@@ -3167,6 +3252,360 @@ function extractClarificationTopic(message) {
   return match[1].replace(/[?.!]+$/g, "").trim();
 }
 
+// ---------------------------------------------------------------------------
+// Equipo Nova: modos de ayuda, impaciencia, control de costos y subidas
+// ---------------------------------------------------------------------------
+
+function normalizeHelpMode(value) {
+  const normalized = normalizeText(value).replace(/\s+/g, "_");
+  if (HELP_MODES.includes(normalized)) {
+    return normalized;
+  }
+  if (["guiame", "guiame_paso_a_paso", "resolver_paso_a_paso", "practicar", "paso_a_paso"].includes(normalized)) {
+    return "guiado";
+  }
+  if (["revisa", "revisa_mi_respuesta", "revision"].includes(normalized)) {
+    return "revisar";
+  }
+  return "rapido";
+}
+
+function getHelpModeLabel(helpMode) {
+  return helpMode === "guiado"
+    ? "Guíame paso a paso"
+    : helpMode === "revisar"
+      ? "Revisa mi respuesta"
+      : "Explícame rápido";
+}
+
+function detectImpatience(message) {
+  const normalized = normalizeText(message);
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    /\bya dime\b/,
+    /\b(dime|dame|pasame|muestrame)( ya)? (la|el) (respuesta|resultado|solucion)\b/,
+    /\bsolo (dime|dame|quiero) (la )?(respuesta|resultado|solucion)\b/,
+    /\bcual es (la respuesta|el resultado)\b/,
+    /^no se\b|\bno se (como|que hacer|nada)\b|^no tengo idea\b/,
+    /\bno entiendo nada\b/,
+    /\bno me sale\b/,
+    /\bme rindo\b/,
+    /\b(resuelvelo|hazlo) tu\b|\bresuelvelo ya\b/,
+    /\bsin tantas preguntas\b|\bdeja de preguntar\b/,
+    /\bjust (tell|give) me (the )?(answer|solution)\b/,
+    /\bi (give up|don'?t know)\b/,
+    /\bdonne[- ]moi la (reponse|solution)\b|\bje ne sais pas\b/
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function buildReviewRequestReply(subjectMode) {
+  if (subjectMode === "languages") {
+    return "Great! Upload a photo, PDF or Word file of your work, or paste your text here, and I will check it for you.";
+  }
+  return "¡Listo para revisar! Sube una foto clara de tu cuaderno, un PDF o un Word con tu respuesta, o escríbela aquí, y te digo si está bien y dónde ajustar.";
+}
+
+function buildTurnContext({
+  studentContext,
+  gradeAdaptationInstructions,
+  helpMode,
+  subjectMode,
+  impatienceDetected,
+  isQuizMode,
+  effectiveUserMessage,
+  attachmentInstructions
+}) {
+  const lines = [
+    "Contexto de este turno:",
+    studentContext,
+    `Modo de ayuda elegido por el estudiante: ${getHelpModeLabel(helpMode)}. Aplica las reglas de ese modo.`,
+    `Impaciencia detectada: ${impatienceDetected ? "sí. Da la solución completa ahora y cierra con un ejercicio parecido para que lo intente." : "no"}`,
+    "",
+    gradeAdaptationInstructions
+  ];
+
+  if (attachmentInstructions) {
+    lines.push(attachmentInstructions.trim());
+  }
+
+  if (isQuizMode) {
+    lines.push(
+      "",
+      "Instrucciones especiales para quiz:",
+      'Devuelve exclusivamente un JSON valido con este formato exacto, sin markdown ni texto adicional:\n{"type":"quiz","title":"string","topic":"string","questions":[{"prompt":"string","options":["string","string","string","string"],"correctIndex":0,"explanation":"string"}],"closing":"string"}',
+      "Reglas:",
+      "- Crea exactamente 5 preguntas de opción múltiple con 4 opciones cada una.",
+      "- correctIndex debe ser un entero entre 0 y 3.",
+      "- El nivel debe ajustarse al grado indicado.",
+      "- Las preguntas deben ser cortas, claras y centradas en el tema conversado o solicitado.",
+      "- Las explicaciones de cada respuesta correcta deben ser de una o dos frases.",
+      '- El closing debe invitar a discutir las respuestas, por ejemplo: "Si quieres, repasamos juntos las que fallaste."',
+      `- ${buildQuizLanguageInstruction({ subjectMode, message: effectiveUserMessage })}`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+// Recorta el historial: pocos mensajes, textos largos acortados y adjuntos solo en el último turno.
+function sanitizeHistory(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  const cleaned = messages
+    .filter((message) => message && (message.role === "user" || message.role === "assistant"))
+    .map((message) => ({
+      role: message.role,
+      content: String(message.content || ""),
+      attachments: Array.isArray(message.attachments) ? message.attachments : []
+    }));
+
+  const recent = cleaned.slice(-(COST_CONTROL.historyMessages + 1));
+  return recent.map((message, index) => {
+    const isLatest = index === recent.length - 1;
+    if (isLatest && message.role === "user") {
+      return message;
+    }
+    const content =
+      message.content.length > COST_CONTROL.historyMessageChars
+        ? `${message.content.slice(0, COST_CONTROL.historyMessageChars)}…`
+        : message.content;
+    return { role: message.role, content };
+  });
+}
+
+function getAttachmentKind(attachment) {
+  const mimeType = String(attachment?.mimeType || "").toLowerCase();
+  const name = String(attachment?.name || "").toLowerCase();
+  if (mimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (mimeType === "application/pdf" || name.endsWith(".pdf")) {
+    return "pdf";
+  }
+  if (mimeType === DOCX_MIME || name.endsWith(".docx")) {
+    return "docx";
+  }
+  return "";
+}
+
+function validateLatestAttachments(history) {
+  const latest = history[history.length - 1];
+  const attachments = latest?.role === "user" && Array.isArray(latest.attachments) ? latest.attachments : [];
+  if (!attachments.length) {
+    return { valid: true, count: 0 };
+  }
+
+  if (attachments.length > UPLOAD_LIMITS.maxFiles) {
+    return { valid: false, error: "Puedes subir un solo archivo por mensaje." };
+  }
+
+  const maxMb = Math.round(UPLOAD_LIMITS.maxBytes / (1024 * 1024));
+  for (const attachment of attachments) {
+    const kind = getAttachmentKind(attachment);
+    if (!kind || typeof attachment.dataUrl !== "string") {
+      return { valid: false, error: "Solo se aceptan fotos o imágenes, PDF y documentos Word (.docx)." };
+    }
+
+    const base64 = extractBase64Payload(attachment.dataUrl);
+    const bytes = Math.floor((base64.length * 3) / 4);
+    if (bytes > UPLOAD_LIMITS.maxBytes) {
+      return { valid: false, error: `El archivo supera el máximo de ${maxMb} MB.` };
+    }
+
+    if (kind === "pdf") {
+      const pages = countPdfPages(Buffer.from(base64, "base64"));
+      if (pages > UPLOAD_LIMITS.maxPdfPages) {
+        return {
+          valid: false,
+          error: `El PDF tiene ${pages} páginas. Sube máximo ${UPLOAD_LIMITS.maxPdfPages} páginas con la parte que quieres revisar.`
+        };
+      }
+    }
+
+    if (kind === "docx") {
+      attachment.mimeType = DOCX_MIME;
+    }
+    if (kind === "pdf") {
+      attachment.mimeType = "application/pdf";
+    }
+  }
+
+  return { valid: true, count: attachments.length };
+}
+
+function countPdfPages(buffer) {
+  const text = buffer.toString("latin1");
+  const pageObjects = (text.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
+  if (pageObjects > 0) {
+    return pageObjects;
+  }
+  // PDF con objetos comprimidos: usamos el /Count más alto del árbol de páginas.
+  const counts = [...text.matchAll(/\/Type\s*\/Pages[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages/g)].map((match) =>
+    Number(match[1] || match[2] || 0)
+  );
+  return counts.length ? Math.max(...counts) : 0;
+}
+
+// Extrae el texto de un .docx (es un ZIP con word/document.xml) sin dependencias externas.
+function extractDocxText(buffer) {
+  try {
+    const zlib = require("zlib");
+    let eocd = -1;
+    for (let index = buffer.length - 22; index >= Math.max(0, buffer.length - 65557); index -= 1) {
+      if (buffer.readUInt32LE(index) === 0x06054b50) {
+        eocd = index;
+        break;
+      }
+    }
+    if (eocd < 0) {
+      return "";
+    }
+
+    const entries = buffer.readUInt16LE(eocd + 10);
+    let pointer = buffer.readUInt32LE(eocd + 16);
+    for (let entry = 0; entry < entries; entry += 1) {
+      if (buffer.readUInt32LE(pointer) !== 0x02014b50) {
+        return "";
+      }
+      const method = buffer.readUInt16LE(pointer + 10);
+      const compressedSize = buffer.readUInt32LE(pointer + 20);
+      const nameLength = buffer.readUInt16LE(pointer + 28);
+      const extraLength = buffer.readUInt16LE(pointer + 30);
+      const commentLength = buffer.readUInt16LE(pointer + 32);
+      const localOffset = buffer.readUInt32LE(pointer + 42);
+      const name = buffer.toString("utf8", pointer + 46, pointer + 46 + nameLength);
+      pointer += 46 + nameLength + extraLength + commentLength;
+
+      if (name !== "word/document.xml") {
+        continue;
+      }
+
+      const localNameLength = buffer.readUInt16LE(localOffset + 26);
+      const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+      const start = localOffset + 30 + localNameLength + localExtraLength;
+      const raw = buffer.subarray(start, start + compressedSize);
+      const xml = (method === 8 ? zlib.inflateRawSync(raw, { maxOutputLength: 10 * 1024 * 1024 }) : raw).toString("utf8");
+      return xml
+        .replace(/<w:tab\/>/g, "\t")
+        .replace(/<w:br[^>]*\/>/g, "\n")
+        .replace(/<\/w:p>/g, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+  } catch (error) {
+    console.warn("No se pudo leer el documento Word:", getErrorText(error));
+  }
+  return "";
+}
+
+async function callOpenAIResponses(apiKey, body) {
+  const send = (payload) =>
+    fetch(`${OPENAI_API_BASE}/responses`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+  const response = await send(body);
+  if (response.status === 400 && body.prompt_cache_key) {
+    const errorText = await response.clone().text();
+    if (errorText.includes("prompt_cache_key")) {
+      const { prompt_cache_key: _ignored, ...withoutCacheKey } = body;
+      return send(withoutCacheKey);
+    }
+  }
+  return response;
+}
+
+let usageLogTableAvailable = true;
+
+// Registra los tokens reales de cada respuesta (consola de Render + tabla tutor_usage_log en Supabase).
+function logTokenUsage({ data, access, helpMode, isQuizMode, hadAttachment, impatienceDetected }) {
+  const usage = data?.usage || {};
+  const inputTokens = Number(usage.input_tokens || 0);
+  const cachedTokens = Number(usage.input_tokens_details?.cached_tokens || 0);
+  const outputTokens = Number(usage.output_tokens || 0);
+  const reasoningTokens = Number(usage.output_tokens_details?.reasoning_tokens || 0);
+  const costUsd =
+    ((inputTokens - cachedTokens) * COST_CONTROL.priceInput +
+      cachedTokens * COST_CONTROL.priceCachedInput +
+      outputTokens * COST_CONTROL.priceOutput) /
+    1_000_000;
+
+  const record = {
+    code: normalizeAccessCode(access?.code) || null,
+    tutor_prefix: getTutorAccessPrefix(),
+    model: String(data?.model || process.env.OPENAI_MODEL || "gpt-6-luna"),
+    help_mode: isQuizMode ? "quiz" : helpMode,
+    had_attachment: Boolean(hadAttachment),
+    impatience: Boolean(impatienceDetected),
+    input_tokens: inputTokens,
+    cached_tokens: cachedTokens,
+    output_tokens: outputTokens,
+    reasoning_tokens: reasoningTokens,
+    cost_usd: Number(costUsd.toFixed(6))
+  };
+  console.log(`[uso] ${JSON.stringify(record)}`);
+
+  if (!isSupabaseConfigured() || !usageLogTableAvailable) {
+    return;
+  }
+
+  supabaseRequest("tutor_usage_log", { method: "POST", prefer: "return=minimal", body: record }).catch((error) => {
+    const message = getErrorText(error);
+    if (/404|42P01|does not exist|PGRST205/.test(message)) {
+      usageLogTableAvailable = false;
+      console.warn("La tabla tutor_usage_log no existe en Supabase. Ejecuta supabase-schema.sql para activarla.");
+      return;
+    }
+    console.warn("No se pudo registrar el uso de tokens:", message);
+  });
+}
+
+async function chargeExtraEnergy(accessPayload, units) {
+  const code = normalizeAccessCode(accessPayload?.code);
+  if (!code || !units) {
+    return;
+  }
+
+  if (isSupabaseConfigured()) {
+    const usage = await getSupabaseUsageRecord(code);
+    await upsertSupabaseUsage(code, {
+      sessions_count: usage.sessions_count,
+      messages_count: usage.messages_count + units
+    });
+    return;
+  }
+
+  const record = getAccessUsageRecord(code);
+  record.messagesToday += units;
+}
+
+function buildEnergyLimitError(used, limit, units) {
+  if (units > ENERGY_COST.message && used + ENERGY_COST.message <= limit) {
+    return "Tu energía de hoy ya no alcanza para revisar archivos. Todavía puedes escribir tus preguntas.";
+  }
+  return `Ya usaste toda tu energía de hoy (${limit} unidades). Vuelve mañana para seguir aprendiendo.`;
+}
+
+function getErrorText(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function normalizeText(text) {
   return String(text || "")
     .toLowerCase()
@@ -3298,20 +3737,37 @@ function sendSvg(res, markup) {
   res.end(markup);
 }
 
+// Errores que el estudiante puede ver. Todo lo demás (OpenAI, Supabase, clave, cuota,
+// facturación, costos) se queda en la consola del servidor y nunca llega al navegador.
+function createStudentError(message) {
+  const error = new Error(message);
+  error.studentFacing = true;
+  return error;
+}
+
+function toStudentError(error, fallbackMessage, context) {
+  if (error && error.studentFacing) {
+    return error.message;
+  }
+  console.error(`[error ${context}]`, error instanceof Error ? error.message : error);
+  return fallbackMessage;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", (chunk) => {
       raw += chunk;
-      if (raw.length > 1_000_000) {
-        reject(new Error("La solicitud es demasiado grande."));
+      // Margen para un archivo de 5 MB codificado en base64 (+37 %) más el historial.
+      if (raw.length > 8_000_000) {
+        reject(createStudentError("El archivo es demasiado grande. El máximo es 5 MB."));
       }
     });
     req.on("end", () => {
       try {
         resolve(raw ? JSON.parse(raw) : {});
       } catch (error) {
-        reject(new Error("JSON invalido en la solicitud."));
+        reject(createStudentError("Solicitud inválida."));
       }
     });
     req.on("error", reject);
@@ -3343,12 +3799,32 @@ function loadEnv(filePath) {
   }
 }
 
+let cachedSystemPrompt = null;
+
+// Instrucciones fijas = reglas comunes del Equipo Nova + sección de la asignatura.
+// Se mantienen idénticas entre mensajes para aprovechar la caché de OpenAI.
 function loadSystemPrompt() {
-  if (fs.existsSync(systemPromptPath)) {
-    return fs.readFileSync(systemPromptPath, "utf8");
+  if (cachedSystemPrompt) {
+    return cachedSystemPrompt;
   }
 
-  return buildFallbackSystemPrompt();
+  const corePath = path.join(promptsDir, "core.md");
+  const subjectPath = path.join(promptsDir, `${getSubjectMode()}.md`);
+  if (fs.existsSync(corePath) && fs.existsSync(subjectPath)) {
+    cachedSystemPrompt = `${fs.readFileSync(corePath, "utf8").trim()}\n\n${fs.readFileSync(subjectPath, "utf8").trim()}`;
+  } else {
+    console.warn("No se encontraron los archivos de prompts/; se usan las instrucciones de respaldo.");
+    cachedSystemPrompt = buildFallbackSystemPrompt();
+  }
+
+  return cachedSystemPrompt;
+}
+
+// Género de la voz del profesor: "male" o "female". TUTOR_VOICE_GENDER permite fijarlo
+// por servicio (útil para nuevos profesores como Felipe o Mateo).
+function getTutorVoiceGender(defaultGender) {
+  const configured = String(process.env.TUTOR_VOICE_GENDER || "").trim().toLowerCase();
+  return configured === "male" || configured === "female" ? configured : defaultGender;
 }
 
 function buildTutorConfig() {
@@ -3391,7 +3867,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso de matemáticas.",
       subjectMode,
-      voicePreference: "neutral",
+      voicePreference: getTutorVoiceGender("male"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Esteban. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con Matemáticas.",
@@ -3435,7 +3911,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: pide explicaciones, líneas de tiempo, comparaciones históricas, quizzes o análisis social escolar.",
       subjectMode,
-      voicePreference: "female",
+      voicePreference: getTutorVoiceGender("female"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy la profesora Laura. Puedo ayudarte con explicaciones claras, análisis guiado y aclaración de dudas sobre temas de Ciencias Sociales. Este tutor trabaja solo dentro de esta asignatura.",
@@ -3479,7 +3955,7 @@ function buildTutorConfig() {
       helperText:
         "Tip: ask for conversation practice, text correction, grammar explanations, vocabulary, guided translation, pronunciation or quizzes.",
       subjectMode,
-      voicePreference: "female",
+      voicePreference: getTutorVoiceGender("female"),
       voiceLanguages: ["en", "fr", "es"],
       welcomeMessage:
         "Hello, I am Miss Emily. I can help you practice English and French with conversation, grammar, vocabulary, pronunciation, reading, writing and guided correction. I will use the language you request or imply.",
@@ -3523,7 +3999,7 @@ function buildTutorConfig() {
       helperText:
         "Consejo: pide explicaciones, problemas de química paso a paso, ideas de proyectos, quizzes, análisis de imágenes o apoyo para presentaciones.",
       subjectMode,
-      voicePreference: "neutral",
+      voicePreference: getTutorVoiceGender("male"),
       voiceLanguages: ["es"],
       welcomeMessage:
         "Hola soy el profesor Andrés. Puedo ayudarte con explicaciones claras, resolución de problemas, proyectos transversales, presentaciones, prácticas de laboratorio y aclaración de dudas sobre Ciencias Naturales y Química. Este tutor trabaja solo dentro de estas áreas.",
@@ -3576,7 +4052,7 @@ function buildTutorConfig() {
         ? "Consejo: prueba pedir una explicación, un quiz, una gráfica o resolver un ejercicio paso a paso de física o matemáticas."
         : "Consejo: prueba pedir una explicación, un quiz o resolver un ejercicio paso a paso.",
     subjectMode,
-    voicePreference: "neutral",
+    voicePreference: getTutorVoiceGender("male"),
     voiceLanguages: ["es"],
     welcomeMessage:
       hybridPhysicsMathTutor
@@ -3668,15 +4144,15 @@ function startMemoryTutorAccessSession(rawCode, rawSessionId) {
   };
 }
 
-async function registerAccessMessage(accessPayload) {
+async function registerAccessMessage(accessPayload, units = 1) {
   if (isSupabaseConfigured()) {
-    return registerSupabaseAccessMessage(accessPayload);
+    return registerSupabaseAccessMessage(accessPayload, units);
   }
 
-  return registerMemoryAccessMessage(accessPayload);
+  return registerMemoryAccessMessage(accessPayload, units);
 }
 
-function registerMemoryAccessMessage(accessPayload) {
+function registerMemoryAccessMessage(accessPayload, units = 1) {
   const code = normalizeAccessCode(accessPayload?.code);
   const sessionId = normalizeSessionId(accessPayload?.session_id);
   const baseValidation = validateTutorAccessCode(code);
@@ -3699,14 +4175,14 @@ function registerMemoryAccessMessage(accessPayload) {
     };
   }
 
-  if (record.messagesToday >= ACCESS_LIMITS.maxMessagesPerDay) {
+  if (record.messagesToday + units > ACCESS_LIMITS.maxMessagesPerDay) {
     return {
       valid: false,
-      error: `Ya alcanzaste el límite de ${ACCESS_LIMITS.maxMessagesPerDay} mensajes por hoy.`
+      error: buildEnergyLimitError(record.messagesToday, ACCESS_LIMITS.maxMessagesPerDay, units)
     };
   }
 
-  record.messagesToday += 1;
+  record.messagesToday += units;
   record.activeUntil = now + ACCESS_LIMITS.activeSessionTtlMs;
   record.lastSeenAt = now;
 
@@ -3819,7 +4295,7 @@ async function startSupabaseAccessSession(rawCode, rawSessionId) {
   };
 }
 
-async function registerSupabaseAccessMessage(accessPayload) {
+async function registerSupabaseAccessMessage(accessPayload, units = 1) {
   const code = normalizeAccessCode(accessPayload?.code);
   const sessionId = normalizeSessionId(accessPayload?.session_id);
   const baseValidation = await validateSupabaseAccessCode(code);
@@ -3843,16 +4319,16 @@ async function registerSupabaseAccessMessage(accessPayload) {
   }
 
   const usage = await getSupabaseUsageRecord(baseValidation.code);
-  if (usage.messages_count >= limits.maxMessagesPerDay) {
+  if (usage.messages_count + units > limits.maxMessagesPerDay) {
     return {
       valid: false,
-      error: `Ya alcanzaste el límite de ${limits.maxMessagesPerDay} mensajes por hoy.`
+      error: buildEnergyLimitError(usage.messages_count, limits.maxMessagesPerDay, units)
     };
   }
 
   const nextUsage = await upsertSupabaseUsage(baseValidation.code, {
     sessions_count: usage.sessions_count,
-    messages_count: usage.messages_count + 1
+    messages_count: usage.messages_count + units
   });
   await patchSupabaseSession(sessionId, {
     last_seen_at: now.toISOString(),
@@ -4319,12 +4795,12 @@ Formato recomendado:
 - Siguiente paso sugerido`;
   }
 
-  return `Eres Profesor Julian, un tutor virtual de fisica y matemáticas para bachillerato en Colombia.
+  return `Eres el Profesor Julián, del Equipo Nova, un tutor virtual de fisica y matemáticas para bachillerato en Colombia.
 
 Tu estilo:
 - Explica con claridad, cercania y precision.
 - Usa espanol claro y natural.
-- Adapta el nivel a 10° y 11°.
+- Adapta el nivel desde 6° hasta 11°.
 - Prioriza comprension conceptual antes que tecnicismos innecesarios.
 - Atiende fisica y matemáticas con igual rigor, entusiasmo, profesionalismo y exigencia pedagógica.
 
