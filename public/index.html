@@ -111,16 +111,6 @@
                 value=""
               />
             </label>
-            <label>
-              Modo
-              <select id="mode">
-                <option value="explicar" selected>Explicar</option>
-                <option value="practicar">Practicar</option>
-                <option value="resolver_paso_a_paso">Paso a paso</option>
-                <option value="quiz">Quiz</option>
-                <option value="repasar_antes_de_examen">Repaso</option>
-              </select>
-            </label>
           </div>
 
           <div class="sidebar-block">
@@ -140,13 +130,26 @@
 
           <div id="messages" class="messages" aria-live="polite"></div>
 
+          <div class="help-modes" role="radiogroup" aria-label="¿Cómo quieres la ayuda?">
+            <button type="button" class="help-mode is-active" data-help-mode="rapido" role="radio" aria-checked="true">
+              <span aria-hidden="true">⚡</span> <span class="help-mode-label">Explícame rápido</span>
+            </button>
+            <button type="button" class="help-mode" data-help-mode="guiado" role="radio" aria-checked="false">
+              <span aria-hidden="true">🧭</span> <span class="help-mode-label">Guíame paso a paso</span>
+            </button>
+            <button type="button" class="help-mode" data-help-mode="revisar" role="radio" aria-checked="false">
+              <span aria-hidden="true">✅</span> <span class="help-mode-label">Revisa mi respuesta</span>
+            </button>
+            <input id="mode" type="hidden" value="rapido" />
+          </div>
+
           <form id="chatForm" class="composer">
             <textarea
               id="messageInput"
               rows="3"
               placeholder="Cargando tutor..."
             ></textarea>
-            <input id="fileInput" type="file" accept="image/*,.pdf,application/pdf" multiple hidden />
+            <input id="fileInput" type="file" accept="image/*,.pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
             <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
             <div class="composer-submit-row">
               <button type="submit" id="sendButton">Enviar</button>
@@ -176,7 +179,7 @@
                   <span class="button-icon" aria-hidden="true">🔊</span>
                   <span>Leer respuesta</span>
                 </button>
-                <button type="button" id="attachButton" class="attach-button">Adjuntar imagen o PDF</button>
+                <button type="button" id="attachButton" class="attach-button">Adjuntar foto, PDF o Word</button>
               </div>
             </div>
             <div class="voice-status" id="voiceStatus" aria-live="polite">

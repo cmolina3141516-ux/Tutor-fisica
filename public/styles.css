@@ -1358,3 +1358,63 @@ body:not(.app-loading) .shell {
   visibility: visible;
   transition: opacity 0.2s ease;
 }
+
+/* Modos de ayuda del Equipo Nova */
+.help-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.help-mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 111, 184, 0.18);
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.help-mode:hover {
+  border-color: rgba(11, 111, 184, 0.42);
+  background: var(--accent-soft);
+}
+
+.help-mode:focus-visible {
+  outline: 3px solid rgba(11, 111, 184, 0.35);
+  outline-offset: 2px;
+}
+
+.help-mode.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+@media (max-width: 560px) {
+  .help-modes {
+    gap: 6px;
+  }
+
+  .help-mode {
+    flex-direction: column;
+    gap: 2px;
+    min-height: 56px;
+    padding: 6px 4px;
+    font-size: 0.78rem;
+  }
+}

@@ -89,3 +89,43 @@ Si no permite `iframe`, publica esta interfaz como pagina externa y enlazala des
 El archivo `public/avatar-orion.svg` es una adaptacion grafica inspirada en la foto adjunta: profesor de laboratorio, bata blanca, fondo academico y elementos de fisica.
 
 Si despues quieres usar la foto real recortada como retrato circular, puedo prepararte una segunda version del widget para eso.
+
+## Equipo Nova: cómo enseñan los tutores (noviembre 2026)
+
+Un mismo código sirve a todos los profesores. La variable `TUTOR_SUBJECT` decide quién es:
+`physics` (Profesor Julián, Física y Matemáticas), `mathematics` (Profesor Esteban), `natural_sciences` (Profesor Andrés),
+`social_studies` (Profesora Laura) y `languages` (Miss Emily).
+
+Las instrucciones de cada profesor viven en `prompts/`:
+
+- `prompts/core.md`: reglas comunes del Equipo Nova (socrático ligero, tres modos de ayuda, detector de impaciencia, formato).
+- `prompts/<asignatura>.md`: identidad, estilo y alcance por grado de cada profesor.
+
+Para ajustar cómo enseña un profesor, edita su archivo y vuelve a desplegar. No hace falta tocar `server.js`.
+
+### Tres modos de ayuda que elige el estudiante
+
+- **Explícame rápido**: respuesta directa y breve, cierra con una pregunta corta.
+- **Guíame paso a paso**: un avance concreto por turno y una sola pregunta; máximo 3 pistas antes de mostrar la solución.
+- **Revisa mi respuesta**: el estudiante sube foto, PDF o Word; el tutor da el veredicto, ubica el primer error y da una pista.
+
+Si el estudiante muestra impaciencia ("ya dime", "no sé", "me rindo"), el tutor da la solución completa y propone un ejercicio parecido.
+
+### Subidas permitidas
+
+Un archivo por mensaje: foto o imagen (se comprime en el dispositivo), PDF de máximo 3 páginas o Word (.docx, se envía solo su texto).
+Tamaño máximo 5 MB.
+
+### Control de costos
+
+- Las instrucciones fijas van primero y son idénticas en cada mensaje, para aprovechar la caché de OpenAI (entrada 90 % más barata).
+- Solo se envían los últimos 8 mensajes, recortados a 1.500 caracteres; los adjuntos solo viajan en el mensaje actual.
+- Tope de salida por respuesta (`OPENAI_MAX_OUTPUT_TOKENS`, por defecto 2500 incluyendo razonamiento).
+- **Energía diaria**: la columna `max_messages_per_day` del código funciona como cupo de energía.
+  Un mensaje cuesta 1, un mensaje con archivo cuesta 4 (1 + `ENERGY_COST_ATTACHMENT`) y una imagen generada suma 8 (`ENERGY_COST_GENERATED_IMAGE`).
+  Las gráficas matemáticas en SVG no consumen energía adicional.
+- Cada respuesta registra tokens y costo estimado en los logs de Render (`[uso] {...}`) y, si existe, en la tabla `tutor_usage_log` de Supabase.
+  Ejecuta de nuevo `supabase-schema.sql` para crearla.
+
+Variables opcionales: `HISTORY_MAX_MESSAGES`, `HISTORY_MAX_CHARS`, `OPENAI_REASONING_EFFORT`, `UPLOAD_MAX_BYTES`,
+`UPLOAD_MAX_PDF_PAGES`, `PRICE_INPUT_PER_M`, `PRICE_CACHED_INPUT_PER_M`, `PRICE_OUTPUT_PER_M`.

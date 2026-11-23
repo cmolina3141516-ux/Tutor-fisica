@@ -36,7 +36,28 @@ create index if not exists access_codes_tutor_prefix_idx on public.access_codes(
 create index if not exists access_sessions_code_active_idx on public.access_sessions(code, is_active);
 create index if not exists access_usage_date_idx on public.access_usage(usage_date);
 
+-- Registro del consumo real de tokens por respuesta (control de costos del Equipo Nova).
+create table if not exists public.tutor_usage_log (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  code text,
+  tutor_prefix text,
+  model text,
+  help_mode text,
+  had_attachment boolean not null default false,
+  impatience boolean not null default false,
+  input_tokens integer not null default 0,
+  cached_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  reasoning_tokens integer not null default 0,
+  cost_usd numeric(12, 6) not null default 0
+);
+
+create index if not exists tutor_usage_log_created_idx on public.tutor_usage_log(created_at);
+create index if not exists tutor_usage_log_code_idx on public.tutor_usage_log(code);
+
 alter table public.access_codes enable row level security;
+alter table public.tutor_usage_log enable row level security;
 alter table public.access_sessions enable row level security;
 alter table public.access_usage enable row level security;
 
@@ -60,3 +81,8 @@ alter table public.access_usage enable row level security;
 --   3,
 --   30
 -- );
+
+-- Consulta útil: costo por tutor y por día.
+-- select tutor_prefix, date(created_at) as dia, count(*) as respuestas,
+--        sum(cost_usd) as costo_usd, round(avg(cached_tokens::numeric / nullif(input_tokens, 0)) * 100) as pct_cache
+-- from public.tutor_usage_log group by 1, 2 order by 2 desc, 1;

@@ -29,8 +29,29 @@ const state = {
   sessionWarned: false,
   avatarClosed: false,
   lastAttachmentBatchSignature: "",
-  lastAttachmentBatchAt: 0
+  lastAttachmentBatchAt: 0,
+  helpMode: "rapido",
+  defaultPlaceholder: ""
 };
+
+const HELP_MODE_LABELS = {
+  es: {
+    rapido: "Explícame rápido",
+    guiado: "Guíame paso a paso",
+    revisar: "Revisa mi respuesta",
+    reviewPlaceholder: "Sube la foto, PDF o Word de tu respuesta, o escríbela aquí..."
+  },
+  en: {
+    rapido: "Quick answer",
+    guiado: "Guide me step by step",
+    revisar: "Check my answer",
+    reviewPlaceholder: "Upload a photo, PDF or Word file of your work, or paste your text here..."
+  }
+};
+
+const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const RAW_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -85,8 +106,46 @@ const elements = {
   topic: document.getElementById("topic"),
   goalLabel: document.getElementById("goalLabel"),
   learningGoal: document.getElementById("learningGoal"),
-  mode: document.getElementById("mode")
+  mode: document.getElementById("mode"),
+  helpModeButtons: [...document.querySelectorAll("[data-help-mode]")]
 };
+
+elements.helpModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setHelpMode(button.dataset.helpMode);
+    elements.input.focus();
+  });
+});
+
+function getHelpModeLabels() {
+  return state.subjectMode === "languages" ? HELP_MODE_LABELS.en : HELP_MODE_LABELS.es;
+}
+
+function setHelpMode(mode) {
+  const nextMode = ["rapido", "guiado", "revisar"].includes(mode) ? mode : "rapido";
+  state.helpMode = nextMode;
+  if (elements.mode) {
+    elements.mode.value = nextMode;
+  }
+  elements.helpModeButtons.forEach((button) => {
+    const isActive = button.dataset.helpMode === nextMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-checked", isActive ? "true" : "false");
+  });
+  if (state.defaultPlaceholder) {
+    elements.input.placeholder = nextMode === "revisar" ? getHelpModeLabels().reviewPlaceholder : state.defaultPlaceholder;
+  }
+}
+
+function applyHelpModeLabels() {
+  const labels = getHelpModeLabels();
+  elements.helpModeButtons.forEach((button) => {
+    const label = button.querySelector(".help-mode-label");
+    if (label) {
+      label.textContent = labels[button.dataset.helpMode] || label.textContent;
+    }
+  });
+}
 
 const ACCESS_STORAGE_KEY = "innovaTutorAccessCode";
 const ACCESS_SESSION_STORAGE_KEY = "innovaTutorAccessSessionId";
@@ -199,7 +258,9 @@ elements.form.addEventListener("submit", async (event) => {
   setBusy(true, "Pensando...");
 
   try {
-    const result = await askTutor(text || "Revisa el archivo adjunto y ayúdame a entenderlo.", outgoingAttachments);
+    const defaultText =
+      state.helpMode === "revisar" ? "Revisa mi respuesta en el archivo adjunto." : "Revisa el archivo adjunto y ayúdame a entenderlo.";
+    const result = await askTutor(text || defaultText, outgoingAttachments);
     appendAssistantResult(result);
     setBusy(false, "Listo");
   } catch (error) {
@@ -247,6 +308,9 @@ async function bootstrap() {
   elements.topic.value = config.defaultTopic || elements.topic.value;
   elements.learningGoal.value = config.defaultLearningGoal || elements.learningGoal.value;
   elements.input.placeholder = config.messagePlaceholder || elements.input.placeholder;
+  state.defaultPlaceholder = elements.input.placeholder;
+  applyHelpModeLabels();
+  setHelpMode(state.helpMode);
   const helper = document.querySelector(".helper");
   if (helper && config.helperText) {
     helper.textContent = config.helperText;
@@ -566,7 +630,7 @@ function getSessionContext() {
     topic: elements.topic.value.trim(),
     learning_goal: elements.learningGoal.value.trim(),
     difficulty: "media",
-    mode: elements.mode.value,
+    help_mode: state.helpMode,
     language: "es"
   };
 }
@@ -883,7 +947,7 @@ function requestQuizDiscussion(quizState, mode) {
     .join("\n");
 
   const topic = quizState.topic || quizState.title || state.subjectName;
-  elements.mode.value = "explicar";
+  setHelpMode("rapido");
   elements.input.value =
     mode === "discusion"
       ? `Discutamos mis respuestas del quiz sobre ${topic}. Estos fueron mis resultados:\n${answerSummary}`
@@ -1329,7 +1393,13 @@ function normalizeImages(images, text) {
 function normalizeUserAttachments(attachments) {
   const normalized = Array.isArray(attachments) ? attachments : [];
   return normalized.map((attachment) => ({
-    label: attachment.name || (attachment.mimeType === "application/pdf" ? "PDF adjunto" : "Imagen adjunta")
+    label:
+      attachment.name ||
+      (attachment.mimeType === "application/pdf"
+        ? "PDF adjunto"
+        : attachment.mimeType === DOCX_MIME
+          ? "Word adjunto"
+          : "Imagen adjunta")
   }));
 }
 
@@ -1343,22 +1413,35 @@ function escapeHtml(value) {
 }
 
 async function readAttachment(file) {
-  const mimeType = file.type || inferMimeType(file.name || "");
+  const mimeType = inferMimeType(file.name || "", file.type || "");
   const isImage = mimeType.startsWith("image/");
   const isPdf = mimeType === "application/pdf";
+  const isDocx = mimeType === DOCX_MIME;
 
-  if (!isImage && !isPdf) {
-    throw new Error(`Tipo de archivo no soportado: ${file.name}`);
+  if (!isImage && !isPdf && !isDocx) {
+    throw new Error(`Solo se aceptan fotos, PDF o Word (.docx). "${file.name}" no es compatible.`);
   }
 
+  const maxMb = Math.round(UPLOAD_MAX_BYTES / (1024 * 1024));
+  if (isImage && file.size > RAW_IMAGE_MAX_BYTES) {
+    throw new Error("La foto es demasiado pesada. Intenta con otra foto o una captura.");
+  }
+  if (!isImage && file.size > UPLOAD_MAX_BYTES) {
+    throw new Error(`El archivo supera el máximo de ${maxMb} MB.`);
+  }
+
+  // Las fotos se reducen y comprimen aquí, en el dispositivo, antes de subirlas.
   const dataUrl = isImage
     ? await readImageAsOptimizedDataUrl(file)
     : await readFileAsDataUrl(file);
+  if (Math.floor((dataUrl.length * 3) / 4) > UPLOAD_MAX_BYTES) {
+    throw new Error(`El archivo supera el máximo de ${maxMb} MB.`);
+  }
   return {
     name: file.name || defaultAttachmentName(mimeType),
     mimeType: isImage ? "image/jpeg" : mimeType,
     dataUrl,
-    kind: isPdf ? "pdf" : "image"
+    kind: isPdf ? "pdf" : isDocx ? "docx" : "image"
   };
 }
 
@@ -1402,8 +1485,14 @@ function loadImage(src) {
   });
 }
 
-function inferMimeType(fileName) {
-  return /\.pdf$/i.test(fileName) ? "application/pdf" : "application/octet-stream";
+function inferMimeType(fileName, declaredType = "") {
+  if (/\.pdf$/i.test(fileName)) {
+    return "application/pdf";
+  }
+  if (/\.docx$/i.test(fileName)) {
+    return DOCX_MIME;
+  }
+  return declaredType || "application/octet-stream";
 }
 
 function defaultAttachmentName(mimeType) {
@@ -1469,7 +1558,11 @@ function renderPendingAttachments() {
 async function handleIncomingFiles(files) {
   setBusy(true, "Procesando adjuntos...");
   try {
-    const attachments = dedupeAttachments(await Promise.all(files.map(readAttachment)));
+    // Un solo archivo por mensaje: el nuevo reemplaza al anterior.
+    const attachments = [await readAttachment(files[0])];
+    if (files.length > 1) {
+      appendMessage("assistant", "Puedes subir un solo archivo por mensaje. Tomé el primero que seleccionaste.");
+    }
     const batchSignature = attachments.map(getAttachmentFingerprint).join("|");
     const now = Date.now();
     if (
@@ -1481,8 +1574,8 @@ async function handleIncomingFiles(files) {
       return;
     }
 
-    const existing = new Set(state.pendingAttachments.map(getAttachmentFingerprint));
-    const nextAttachments = [...state.pendingAttachments];
+    const existing = new Set();
+    const nextAttachments = [];
     let addedCount = 0;
     for (const attachment of attachments) {
       const fingerprint = getAttachmentFingerprint(attachment);
