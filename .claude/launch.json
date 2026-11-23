@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["start"],
       "port": 8787
+    },
+    {
+      "name": "nova-school",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "../nova-school", "run", "dev"],
+      "port": 3000
     }
   ]
 }
