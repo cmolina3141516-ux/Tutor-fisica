@@ -69,7 +69,8 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 4. Crear un servicio de prueba en Render desde la rama, validar y fusionar el PR.
 5. Crear a Felipe y Mateo (nuevos `TUTOR_SUBJECT` y archivos en `prompts/`).
 6. En `innova-school-panel`: Render ya tiene una clave propia (verificado el 2026-11-23). Límite de intentos agregado y desplegado el 2026-11-23. Pendiente: rotarla por una larga y aleatoria (la pone Carlos).
-7. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
+7. **Recordatorio de Carlos (2026-11-23): hacer que los profesores acepten el pase `?nova=` de Nova School.** Verificar la firma HMAC-SHA256 con `NOVA_TUTOR_SECRET` (el mismo de Nova School), el vencimiento de 5 min, que el profesor coincida y que el `jti` no se reuse; si es válido, abrir la sesión sin código de acceso. Trabajarlo en `depuracion-equipo-nova` (se prueba en `tutor-julian-prueba`), no en `main`.
+8. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
 
 ## Registro de decisiones
 
