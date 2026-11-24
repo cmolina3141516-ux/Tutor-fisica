@@ -1418,3 +1418,31 @@ body:not(.app-loading) .shell {
     font-size: 0.78rem;
   }
 }
+
+/* Volver a entrar fácil: acceso recordado en el dispositivo */
+.access-gate-card .access-help {
+  display: flex;
+}
+
+.forget-device-button {
+  margin-top: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.75;
+  font-size: 0.82rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.forget-device-button:hover {
+  opacity: 1;
+}
+
+.restart-session-button {
+  margin-top: 10px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-weight: 700;
+}

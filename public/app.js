@@ -150,6 +150,35 @@ function applyHelpModeLabels() {
 
 const ACCESS_STORAGE_KEY = "innovaTutorAccessCode";
 const ACCESS_SESSION_STORAGE_KEY = "innovaTutorAccessSessionId";
+const DEFAULT_ACCESS_RECOVERY_URL = "https://innova-school-panel.onrender.com/entrar";
+
+// El código se recuerda en este dispositivo (localStorage) para que el estudiante vuelva a entrar
+// abriendo la dirección del profesor, sin buscar el enlace. «Salir y olvidar este dispositivo» lo borra.
+function readStoredAccessCode() {
+  try {
+    return window.localStorage.getItem(ACCESS_STORAGE_KEY) || window.sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
+  } catch (_error) {
+    return window.sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
+  }
+}
+
+function rememberAccessCode(code) {
+  try {
+    window.localStorage.setItem(ACCESS_STORAGE_KEY, code);
+  } catch (_error) {
+    window.sessionStorage.setItem(ACCESS_STORAGE_KEY, code);
+  }
+}
+
+function forgetAccessCode() {
+  try {
+    window.localStorage.removeItem(ACCESS_STORAGE_KEY);
+  } catch (_error) {
+    // sin almacenamiento local
+  }
+  window.sessionStorage.removeItem(ACCESS_STORAGE_KEY);
+  window.sessionStorage.removeItem(ACCESS_SESSION_STORAGE_KEY);
+}
 
 bootstrap().catch((error) => {
   document.body.classList.remove("app-loading");
@@ -215,6 +244,19 @@ elements.speechLanguageSelect?.addEventListener("change", () => {
     state.recognition.lang = state.speechRecognitionLanguage;
   }
   setVoiceStatus(getVoiceReadyLabel(), state.handsFree ? "active" : "idle");
+});
+
+document.getElementById("forgetDeviceButton")?.addEventListener("click", () => {
+  if (!window.confirm("¿Salir y olvidar este dispositivo? La próxima vez tendrás que entrar con el enlace del correo o tu código.")) {
+    return;
+  }
+  endAccessSession();
+  forgetAccessCode();
+  window.location.href = window.location.pathname;
+});
+
+document.getElementById("restartSessionButton")?.addEventListener("click", () => {
+  window.location.reload();
 });
 
 window.addEventListener("pagehide", () => {
@@ -294,6 +336,11 @@ async function bootstrap() {
     ? config.voiceLanguages
     : state.voiceLanguages;
   state.speechRecognitionLanguage = getDefaultRecognitionLanguage();
+
+  const recoveryLink = document.getElementById("accessRecoveryLink");
+  if (recoveryLink) {
+    recoveryLink.href = config.accessRecoveryUrl || DEFAULT_ACCESS_RECOVERY_URL;
+  }
 
   document.title = config.pageTitle || "Tutor IA Embebible";
   elements.heroEyebrow.textContent = config.heroEyebrow || `Tutor IA de ${state.subjectName}`;
@@ -414,7 +461,7 @@ async function initializeAccessGate() {
   }
 
   const codeFromUrl = params.get("code") || params.get("access");
-  const storedCode = window.sessionStorage.getItem(ACCESS_STORAGE_KEY);
+  const storedCode = readStoredAccessCode();
   const storedSessionId = window.sessionStorage.getItem(ACCESS_SESSION_STORAGE_KEY);
   const preferredCode = codeFromUrl || storedCode || "";
   if (storedSessionId) {
@@ -426,6 +473,16 @@ async function initializeAccessGate() {
     const isValid = await validateAccessCode(preferredCode, false);
     if (isValid) {
       return true;
+    }
+    if (!codeFromUrl && storedCode && /no existe|venci|desactivad|no est[aá] autorizado|inv[aá]lido|otro tutor/i.test(state.lastAccessError || "")) {
+      forgetAccessCode();
+      elements.accessCodeInput.value = "";
+      showAccessGate("Tu acceso guardado ya no está vigente. Escribe un código nuevo o recupéralo con tu correo.");
+      return false;
+    }
+    if (state.lastAccessError) {
+      showAccessGate(state.lastAccessError);
+      return false;
     }
   }
 
@@ -456,8 +513,10 @@ async function validateAccessCode(rawCode, showErrors) {
     });
     const data = await response.json();
     if (!response.ok || !data.valid) {
-      throw new Error(data.error || "Código no autorizado.");
+      state.lastAccessError = data.error || "Código no autorizado.";
+      throw new Error(state.lastAccessError);
     }
+    state.lastAccessError = "";
 
     state.accessGranted = true;
     state.accessCode = data.code || code;
@@ -468,7 +527,7 @@ async function validateAccessCode(rawCode, showErrors) {
       elements.gradeLevel.value = data.student.grade;
     }
     state.accessSessionId = data.sessionId || state.accessSessionId;
-    window.sessionStorage.setItem(ACCESS_STORAGE_KEY, state.accessCode);
+    rememberAccessCode(state.accessCode);
     if (state.accessSessionId) {
       window.sessionStorage.setItem(ACCESS_SESSION_STORAGE_KEY, state.accessSessionId);
     }
@@ -507,7 +566,7 @@ async function enterWithNovaPass(pass) {
     state.accessGranted = true;
     state.accessCode = data.code;
     state.accessSessionId = data.sessionId || state.accessSessionId;
-    window.sessionStorage.setItem(ACCESS_STORAGE_KEY, state.accessCode);
+    rememberAccessCode(state.accessCode);
     if (state.accessSessionId) {
       window.sessionStorage.setItem(ACCESS_SESSION_STORAGE_KEY, state.accessSessionId);
     }

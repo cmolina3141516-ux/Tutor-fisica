@@ -75,7 +75,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const tutorConfig = buildTutorConfig();
       sendJson(res, 200, {
-        ...tutorConfig
+        ...tutorConfig,
+        accessRecoveryUrl: String(process.env.ACCESS_RECOVERY_URL || "https://innova-school-panel.onrender.com/entrar")
       });
     } catch (error) {
       sendJson(res, 500, { error: toStudentError(error, "No se pudo cargar el tutor. Intenta de nuevo en unos minutos.", "config") });
