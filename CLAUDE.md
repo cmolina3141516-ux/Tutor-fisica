@@ -25,8 +25,8 @@ Este archivo resume la conversación con Claude del 23 de noviembre de 2026 dond
 | Andrés | Ciencias Naturales y Química | `natural_sciences` | tutor-naturales.onrender.com (servicio «Tutor-naturales») |
 | Laura | Ciencias Sociales | `social_studies` | tutor-sociales.onrender.com |
 | Miss Emily | Inglés y Francés | `languages` | tutor-emily.onrender.com |
-| Felipe | Tecnología, Programación y Robótica | (no existe aún) | pendiente |
-| Mateo | Lectura Crítica y Filosofía | (no existe aún) | pendiente |
+| Felipe | Tecnología, Programación y Robótica | `technology` | tutor-felipe.onrender.com |
+| Mateo | Lectura Crítica y Filosofía | `critical_reading` | tutor-mateo.onrender.com |
 
 Este repositorio sirve a todos: la variable `TUTOR_SUBJECT` decide el profesor. **Confirmado (2026-11-23) en el panel de Render:** los cinco servicios despliegan desde `cmolina3141516-ux/Tutor-fisica`, rama `main`. **Los cinco tienen auto-deploy «On Commit»** (encendido en Tutor-fisica —proyecto «TUTOR FÍSICA»—, Tutor-sociales, Tutor-Emily y Tutor-naturales el 2026-11-23): todo push a `main` se publica solo en los cinco profesores, así que a `main` solo llega código probado.
 
@@ -67,7 +67,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 2. Confirmar desde qué repositorio despliega cada servicio de Render.
 3. ~~Ejecutar `supabase-schema.sql` en Supabase para crear `tutor_usage_log`.~~ Hecho el 2026-11-23.
 4. Crear un servicio de prueba en Render desde la rama, validar y fusionar el PR.
-5. Crear a Felipe y Mateo (nuevos `TUTOR_SUBJECT` y archivos en `prompts/`).
+5. ~~Crear a Felipe y Mateo.~~ Hecho el 2026-11-24 (ver registro). Falta que Carlos pegue `OPENAI_API_KEY` y `SUPABASE_SERVICE_ROLE_KEY` en tutor-felipe y tutor-mateo.
 6. En `innova-school-panel`: Render ya tiene una clave propia (verificado el 2026-11-23). Límite de intentos agregado y desplegado el 2026-11-23. Pendiente: rotarla por una larga y aleatoria (la pone Carlos).
 7. ~~Hacer que los profesores acepten el pase `?nova=` de Nova School.~~ Hecho en la rama `depuracion-equipo-nova` el 2026-11-23 (ver registro). Falta: poner la misma `NOVA_TUTOR_SECRET` en Nova School y en los profesores, probar de punta a punta y pasarlo a `main`.
 8. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
@@ -114,6 +114,9 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 - **2026-11-23** — Tutor-matemáticas, Tutor-naturales y Tutor-sociales **no tienen configurado Supabase** (Julián y Miss Emily sí). Carlos les agregó `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` el 2026-11-23. Verificado: los cinco profesores consultan Supabase y muestran el profesor correcto.
 - **2026-11-24** — **Decisión de Carlos: venta de profesores sin packs.** En Tiendanube queda un solo producto a $90.000 por profesor por 1 mes, con variante por profesor (Julián, Esteban, Andrés, Laura, Miss Emily); el cliente agrega en el carrito los que quiera y la cantidad (una unidad = un código), a precio completo. Se retiran los packs de 4, 5 y 6 (el de 6 no se podía entregar: Felipe y Mateo no existen). Descuentos futuros, con cupones o promociones de Tiendanube. Pendiente: stock ilimitado en las variantes y el envío automático del código por correo en `innova-school-panel` (como Saber 11: app propia de Tiendanube + Resend).
 - **2026-11-24** — **Decisión de Carlos: la venta de profesores sigue la oferta de la página del panel**, con sus asignaturas: Julián (Física y Matemáticas), Andrés (Ciencias Naturales y Química), Felipe (Tecnología, Programación y Robótica), Mateo (Lectura Crítica y Filosofía), Miss Emily (Inglés y Francés) y Laura (Ciencias Sociales). **Esteban no se vende** por ahora (Julián cubre Matemáticas). Variantes de Tiendanube con esos nombres; Felipe y Mateo solo cuando existan sus servicios.
+- **2026-11-24** — **Felipe y Mateo creados y en producción** (pedido de Carlos: «Créalos ya»; «Sí, a producción»). `TUTOR_SUBJECT=technology` (Profesor Felipe: Tecnología, Programación y Robótica; prefijo FELIPE) y `critical_reading` (Profesor Mateo: Lectura Crítica y Filosofía, con las tres competencias de Lectura Crítica del Saber 11; prefijo MATEO). Instrucciones en `prompts/technology.md` y `prompts/critical_reading.md`; fotos dentro del servicio (`public/avatars/`). Probados localmente con la clave de pruebas (explicación, revisión de código o texto, grado 6°, quiz tipo Saber 11, pregunta de otra asignatura): bien, US$0,0001–0,0006 por mensaje. Servicios nuevos en Render, plan Free, desde `Tutor-fisica`/`main` con auto-deploy: **tutor-felipe** y **tutor-mateo** (Render marca por defecto el plan de US$7; se eligió Free). Tienen OPENAI_MODEL, SCHOOL_NAME, TUTOR_NAME, TUTOR_SUBJECT y SUPABASE_URL; **faltan las dos claves secretas** (las pega Carlos). También en `main` (commit `141ed06`, desplegado en los cinco profesores y verificado): los bloques de código ya no pasan por la limpieza de LaTeX/Markdown, y el pase de Nova School (inactivo sin `NOVA_TUTOR_SECRET`).
+- **2026-11-24** — **Decisión de Carlos: el profesor llama al estudiante por su primer nombre solo en el saludo inicial.** `personalizeWelcome` en `public/app.js` («Hola, Ana. Soy el profesor…»); el nombre sale del código en Supabase (`student_name`), del pase de Nova School o del campo Nombre. El nombre ya no se envía a OpenAI y `prompts/core.md` pide no usarlo en las respuestas.
+- **2026-11-24** — Panel de venta (`innova-school-panel`, commit `6392af7`, desplegado a mano): enlaces de Felipe y Mateo a sus servicios y las fotos de los profesores guardadas en `assets/` (antes en postimage e ImgBB; la de Andrés falló con 503).
 
 ## Cómo probar sin gastar
 
