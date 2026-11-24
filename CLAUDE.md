@@ -112,6 +112,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 - **2026-11-23** — **Lema de Nova School: «Educación On line con I.A.»** (elección de Carlos; reemplaza «Tu equipo de profesores con IA, de 6° a 11°»). Repo `nova-school`, commit `7f0d8fb`. El párrafo de ingreso conserva «De 6° a 11°».
 - **2026-11-23** — **Enlace de Andrés corregido en el panel** (pedido de Carlos): `innova-school-panel` commit `6969caa`, desplegado a mano en Render; los códigos de Andrés ahora apuntan a `tutor-naturales.onrender.com`. Los enlaces ya enviados a compradores de Andrés hay que reenviarlos.
 - **2026-11-23** — Tutor-matemáticas, Tutor-naturales y Tutor-sociales **no tienen configurado Supabase** (Julián y Miss Emily sí). Carlos les agregó `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` el 2026-11-23. Verificado: los cinco profesores consultan Supabase y muestran el profesor correcto.
+- **2026-11-24** — **Decisión de Carlos: venta de profesores sin packs.** En Tiendanube queda un solo producto a $90.000 por profesor por 1 mes, con variante por profesor (Julián, Esteban, Andrés, Laura, Miss Emily); el cliente agrega en el carrito los que quiera y la cantidad (una unidad = un código), a precio completo. Se retiran los packs de 4, 5 y 6 (el de 6 no se podía entregar: Felipe y Mateo no existen). Descuentos futuros, con cupones o promociones de Tiendanube. Pendiente: stock ilimitado en las variantes y el envío automático del código por correo en `innova-school-panel` (como Saber 11: app propia de Tiendanube + Resend).
 
 ## Cómo probar sin gastar
 
