@@ -67,7 +67,7 @@ Un archivo por mensaje: foto/imagen (se comprime en el dispositivo a 1100 px), P
 2. Confirmar desde qué repositorio despliega cada servicio de Render.
 3. ~~Ejecutar `supabase-schema.sql` en Supabase para crear `tutor_usage_log`.~~ Hecho el 2026-11-23.
 4. Crear un servicio de prueba en Render desde la rama, validar y fusionar el PR.
-5. ~~Crear a Felipe y Mateo.~~ Hecho el 2026-11-24 (ver registro). Falta que Carlos pegue `OPENAI_API_KEY` y `SUPABASE_SERVICE_ROLE_KEY` en tutor-felipe y tutor-mateo.
+5. ~~Crear a Felipe y Mateo.~~ Hecho el 2026-11-24 (ver registro). Carlos pegó sus claves el mismo día; verificado que consultan Supabase. Falta una conversación real con un código creado en el panel.
 6. En `innova-school-panel`: Render ya tiene una clave propia (verificado el 2026-11-23). Límite de intentos agregado y desplegado el 2026-11-23. Pendiente: rotarla por una larga y aleatoria (la pone Carlos).
 7. ~~Hacer que los profesores acepten el pase `?nova=` de Nova School.~~ Hecho en la rama `depuracion-equipo-nova` el 2026-11-23 (ver registro). Falta: poner la misma `NOVA_TUTOR_SECRET` en Nova School y en los profesores, probar de punta a punta y pasarlo a `main`.
 8. Más adelante: conectar los tutores a la nueva plataforma (encargos del docente ligados a DBA, conversaciones guardadas para el tablero docente).
