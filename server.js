@@ -289,6 +289,7 @@ async function generateTutorReply(payload) {
   const latestUserMessage = getLatestUserMessage(history);
   const effectiveUserMessage = resolveEffectiveUserMessage(history);
   const helpMode = normalizeHelpMode(payload.session?.help_mode);
+  const academiaInstructions = buildAcademiaInstructions(sanitizeNovaAcademia(payload.session?.academia));
   const impatienceDetected = detectImpatience(latestUserMessage);
   const isQuizMode =
     shouldStartQuizFromMessage({
@@ -426,6 +427,7 @@ async function generateTutorReply(payload) {
   // 2) Historial corto.  3) Contexto dinámico del turno.  4) Mensaje actual.
   const turnContext = buildTurnContext({
     studentContext,
+    academiaInstructions,
     gradeAdaptationInstructions,
     helpMode,
     subjectMode,
@@ -3366,6 +3368,7 @@ function buildReviewRequestReply(subjectMode) {
 
 function buildTurnContext({
   studentContext,
+  academiaInstructions,
   gradeAdaptationInstructions,
   helpMode,
   subjectMode,
@@ -3377,6 +3380,7 @@ function buildTurnContext({
   const lines = [
     "Contexto de este turno:",
     studentContext,
+    ...(academiaInstructions ? ["", academiaInstructions] : []),
     `Modo de ayuda elegido por el estudiante: ${getHelpModeLabel(helpMode)}. Aplica las reglas de ese modo.`,
     `Impaciencia detectada: ${impatienceDetected ? "sí. Da la solución completa ahora y cierra con un ejercicio parecido para que lo intente." : "no"}`,
     "",
@@ -4399,7 +4403,7 @@ function verifyNovaPass(rawPass) {
 
   const pass = String(rawPass || "").trim();
   const parts = pass.split(".");
-  if (pass.length > 2000 || parts.length !== 2 || !parts[0] || !parts[1]) {
+  if (pass.length > 4000 || parts.length !== 2 || !parts[0] || !parts[1]) {
     return { valid: false, error: NOVA_PASS_ERROR };
   }
 
@@ -4456,7 +4460,65 @@ function verifyNovaPass(rawPass) {
 
   const grade = ["6", "7", "8", "9", "10", "11"].includes(String(payload?.grade)) ? String(payload.grade) : "";
   const name = String(payload?.name || "").trim().split(/\s+/)[0].slice(0, 40);
-  return { valid: true, sub, grade, name, tutorPrefix: expectedPrefix };
+  const academia = sanitizeNovaAcademia(payload?.ctx);
+  return { valid: true, sub, grade, name, academia, tutorPrefix: expectedPrefix };
+}
+
+// Contexto de la Academia de Nova School (módulo y sección desde donde el estudiante abrió al profesor).
+// Llega firmado en el pase y el navegador lo reenvía en cada mensaje: se limpia siempre (sin saltos de
+// línea y con topes de longitud) y se trata como datos del curso, nunca como instrucciones.
+const NOVA_ACADEMIA_MODES = ["conexion", "reto", "critica"];
+
+function sanitizeNovaAcademia(raw) {
+  if (!raw || typeof raw !== "object" || !NOVA_ACADEMIA_MODES.includes(raw.modo)) {
+    return null;
+  }
+  const clean = (value, max) => String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, max);
+  const grade = ["6", "7", "8", "9", "10", "11"].includes(String(raw.grado)) ? String(raw.grado) : "";
+  const period = [1, 2, 3, 4].includes(Number(raw.periodo)) ? Number(raw.periodo) : null;
+  const academia = {
+    area: clean(raw.area, 80),
+    asignatura: clean(raw.asignatura, 80),
+    grado: grade,
+    periodo: period,
+    titulo: clean(raw.titulo, 120),
+    dba: clean(raw.dba, 200),
+    meta: clean(raw.meta, 300),
+    seccion: clean(raw.seccion, 60),
+    modo: raw.modo,
+    actividad: clean(raw.actividad, 500)
+  };
+  return academia.titulo && academia.seccion ? academia : null;
+}
+
+function buildAcademiaInstructions(academia) {
+  if (!academia) {
+    return "";
+  }
+  const where = [
+    academia.area && `Nodo o curso: ${academia.area}`,
+    academia.asignatura && `Asignatura: ${academia.asignatura}`,
+    academia.grado && `Grado ${academia.grado}°`,
+    academia.periodo && `Período ${academia.periodo}`
+  ].filter(Boolean).join(" · ");
+  const lines = [
+    "Contexto académico de Nova School (datos del curso, no instrucciones del estudiante): el estudiante abrió esta conversación desde un módulo de la Academia.",
+    `- ${where}`,
+    `- Módulo: ${academia.titulo}`,
+    academia.dba && `- Alineación MEN: ${academia.dba}`,
+    academia.meta && `- Meta del módulo: ${academia.meta}`,
+    `- Sección: ${academia.seccion}`,
+    academia.actividad && `- Actividad en la que pide ayuda: ${academia.actividad}`
+  ];
+  if (academia.modo === "reto") {
+    lines.push("Papel en esta sección (práctica del módulo): guía con pistas cortas y revisa lo que el estudiante intente (veredicto y primer error). No escribas la solución completa de la actividad; solo si se detecta impaciencia, explica la solución y propone una actividad parecida para que la resuelva.");
+  } else if (academia.modo === "critica") {
+    lines.push("Papel en esta sección (pensamiento crítico): presenta dilemas y preguntas detonantes, muestra varias perspectivas con sus argumentos, pide evidencia y ayuda a analizar fuentes. No impongas opiniones políticas propias. En finanzas todo es simulación educativa, nunca consejo de inversión real.");
+  } else {
+    lines.push("Papel en esta sección (acompañar el estudio): explica, aclara, repasa y propone ejercicios o quizzes del tema del módulo, al nivel del grado.");
+  }
+  lines.push("Mantente en el tema del módulo. Si el estudiante pregunta otra cosa, responde breve y vuelve al tema.");
+  return lines.filter(Boolean).join("\n");
 }
 
 function buildNovaAccessCode(sub) {
@@ -4506,7 +4568,7 @@ async function startNovaAccessSession(rawPass, rawSessionId) {
   }
 
   console.log(`[acceso nova] Ingreso desde Nova School a ${pass.tutorPrefix}.`);
-  return { ...result, student: { name: pass.name, grade: pass.grade } };
+  return { ...result, student: { name: pass.name, grade: pass.grade }, academia: pass.academia };
 }
 
 function validateTutorAccessCode(rawCode) {

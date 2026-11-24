@@ -150,6 +150,8 @@ function applyHelpModeLabels() {
 
 const ACCESS_STORAGE_KEY = "innovaTutorAccessCode";
 const ACCESS_SESSION_STORAGE_KEY = "innovaTutorAccessSessionId";
+// Contexto del módulo de la Academia de Nova School (por pestaña).
+const NOVA_ACADEMIA_STORAGE_KEY = "novaAcademiaContext";
 const DEFAULT_ACCESS_RECOVERY_URL = "https://innova-school-panel.onrender.com/entrar";
 
 // El código se recuerda en este dispositivo (localStorage) para que el estudiante vuelva a entrar
@@ -460,6 +462,7 @@ async function initializeAccessGate() {
     return false;
   }
 
+  restoreNovaAcademia();
   const codeFromUrl = params.get("code") || params.get("access");
   const storedCode = readStoredAccessCode();
   const storedSessionId = window.sessionStorage.getItem(ACCESS_SESSION_STORAGE_KEY);
@@ -544,6 +547,40 @@ async function validateAccessCode(rawCode, showErrors) {
   }
 }
 
+// Contexto de la Academia: el tema y la meta del módulo llenan los campos de la clase, y el modo de ayuda
+// arranca según la sección (práctica → paso a paso). Se guarda por pestaña para que sobreviva a recargar.
+function applyNovaAcademia(academia, isNewEntry) {
+  state.academia = academia && academia.titulo ? academia : null;
+  if (!state.academia) {
+    if (isNewEntry) {
+      window.sessionStorage.removeItem(NOVA_ACADEMIA_STORAGE_KEY);
+    }
+    return;
+  }
+  window.sessionStorage.setItem(NOVA_ACADEMIA_STORAGE_KEY, JSON.stringify(state.academia));
+  if (elements.topic) {
+    elements.topic.value = state.academia.titulo;
+  }
+  if (elements.learningGoal && state.academia.meta) {
+    elements.learningGoal.value = state.academia.meta;
+  }
+  if (state.academia.grado && elements.gradeLevel) {
+    elements.gradeLevel.value = state.academia.grado;
+  }
+  if (isNewEntry) {
+    setHelpMode(state.academia.modo === "reto" ? "guiado" : "rapido");
+  }
+}
+
+function restoreNovaAcademia() {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(NOVA_ACADEMIA_STORAGE_KEY) || "null");
+    applyNovaAcademia(stored, false);
+  } catch (_error) {
+    window.sessionStorage.removeItem(NOVA_ACADEMIA_STORAGE_KEY);
+  }
+}
+
 // Ingreso desde Nova School: devuelve true si entró, o el mensaje para el estudiante.
 async function enterWithNovaPass(pass) {
   setAccessBusy(true);
@@ -576,6 +613,7 @@ async function enterWithNovaPass(pass) {
     if (data.student?.grade && elements.gradeLevel) {
       elements.gradeLevel.value = data.student.grade;
     }
+    applyNovaAcademia(data.academia || null, true);
     hideAccessGate();
     setChatLocked(false);
     return true;
@@ -777,7 +815,8 @@ function getSessionContext() {
     learning_goal: elements.learningGoal.value.trim(),
     difficulty: "media",
     help_mode: state.helpMode,
-    language: "es"
+    language: "es",
+    ...(state.academia ? { academia: state.academia } : {})
   };
 }
 
