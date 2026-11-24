@@ -629,6 +629,10 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLe
   const subjectLabel = getSubjectLabel(subjectMode);
   const visualPrompt = buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel });
 
+  // gpt-image-1 fue retirado por OpenAI (respondía «model does not exist»). gpt-image-2 en calidad baja
+  // dibuja diagramas escolares correctos y en español (~US$0,006 por imagen); WebP pesa ~80 KB en vez de ~1 MB.
+  const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+  const outputFormat = "webp";
   try {
     const response = await fetch(`${OPENAI_API_BASE}/images/generations`, {
       method: "POST",
@@ -637,21 +641,27 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLe
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+        model: imageModel,
         prompt: visualPrompt,
-        size: "1024x1024"
+        size: "1024x1024",
+        quality: process.env.OPENAI_IMAGE_QUALITY || "low",
+        output_format: outputFormat,
+        output_compression: 80
       })
     });
 
     if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error(`[error imagen] ${imageModel} respondió ${response.status}: ${detail.slice(0, 300)}`);
       return null;
     }
 
     const data = await response.json();
+    console.log(`[uso imagen] ${JSON.stringify({ model: imageModel, subject: subjectMode, usage: data.usage || null })}`);
     const image = Array.isArray(data.data) ? data.data[0] : null;
     const src =
       typeof image?.b64_json === "string" && image.b64_json
-        ? `data:image/png;base64,${image.b64_json}`
+        ? `data:image/${outputFormat};base64,${image.b64_json}`
         : typeof image?.url === "string" && image.url
           ? image.url
           : "";
@@ -673,6 +683,7 @@ async function generateSubjectVisualImage({ apiKey, subjectMode, prompt, gradeLe
       ]
     };
   } catch (error) {
+    console.error(`[error imagen] ${imageModel}: ${error?.message || error}`);
     return null;
   }
 }
