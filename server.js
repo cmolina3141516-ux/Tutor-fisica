@@ -87,6 +87,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/access/validate") {
     try {
       const body = await readJsonBody(req);
+      if (isNovaAccessCode(body.code)) {
+        sendJson(res, 403, { error: NOVA_ONLY_ACADEMIA_ERROR, novaAcademiaRequired: true });
+        return;
+      }
       const result = await startTutorAccessSession(body.code, body.session_id);
       if (!result.valid) {
         sendJson(res, 403, { error: result.error });
@@ -239,6 +243,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const academia = verifyAcademiaToken(body.session?.academia_token, body.access?.code);
+      if (isNovaAccessCode(body.access?.code) && !academia) {
+        sendJson(res, 403, { error: NOVA_ONLY_ACADEMIA_ERROR, novaAcademiaRequired: true });
+        return;
+      }
+      body.academia = academia;
+
       const energyUnits = ENERGY_COST.message + (uploadCheck.count ? ENERGY_COST.attachment : 0);
       const accessResult = await registerAccessMessage(body.access, energyUnits);
       if (!accessResult.valid) {
@@ -289,7 +300,7 @@ async function generateTutorReply(payload) {
   const latestUserMessage = getLatestUserMessage(history);
   const effectiveUserMessage = resolveEffectiveUserMessage(history);
   const helpMode = normalizeHelpMode(payload.session?.help_mode);
-  const academiaInstructions = buildAcademiaInstructions(sanitizeNovaAcademia(payload.session?.academia));
+  const academiaInstructions = buildAcademiaInstructions(payload.academia || null);
   const impatienceDetected = detectImpatience(latestUserMessage);
   const isQuizMode =
     shouldStartQuizFromMessage({
@@ -4521,6 +4532,53 @@ function buildAcademiaInstructions(academia) {
   return lines.filter(Boolean).join("\n");
 }
 
+// Los estudiantes de Nova School solo usan al profesor desde la Academia: cada entrada trae el módulo y la
+// sección (ctx del pase). El profesor devuelve ese contexto firmado (academiaToken), atado al código del
+// estudiante y con vencimiento; el navegador lo reenvía en cada mensaje y aquí se verifica. Sin un contexto
+// válido, un código Nova no puede conversar (no hay uso libre fuera de las secciones destinadas).
+const NOVA_ONLY_ACADEMIA_ERROR = "Abre a tu profesor desde la Academia de Nova School, en la sección del módulo donde está disponible.";
+
+function isNovaAccessCode(code) {
+  return /-NOVA-[0-9A-F]{20}$/.test(normalizeAccessCode(code));
+}
+
+function signAcademiaToken(academia, code) {
+  const secret = getNovaSecret();
+  if (!secret || !academia) {
+    return "";
+  }
+  const body = Buffer.from(JSON.stringify({
+    ctx: academia,
+    code: normalizeAccessCode(code),
+    exp: Math.floor((Date.now() + NOVA_PASS.codeTtlMs) / 1000)
+  })).toString("base64url");
+  const sig = createHmac("sha256", secret).update(`academia:${body}`).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+function verifyAcademiaToken(rawToken, code) {
+  const secret = getNovaSecret();
+  const token = String(rawToken || "");
+  const parts = token.split(".");
+  if (!secret || token.length > 6000 || parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
+  }
+  const expected = createHmac("sha256", secret).update(`academia:${parts[0]}`).digest();
+  const received = Buffer.from(parts[1], "base64url");
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    return null;
+  }
+  try {
+    const data = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    if (data.code !== normalizeAccessCode(code) || !(Number(data.exp) > Date.now() / 1000)) {
+      return null;
+    }
+    return sanitizeNovaAcademia(data.ctx);
+  } catch (_error) {
+    return null;
+  }
+}
+
 function buildNovaAccessCode(sub) {
   const hash = createHmac("sha256", getNovaSecret()).update(`nova-uid:${sub}`).digest("hex").slice(0, 20).toUpperCase();
   return `${getTutorAccessPrefix()}-NOVA-${hash}`;
@@ -4530,6 +4588,10 @@ async function startNovaAccessSession(rawPass, rawSessionId) {
   const pass = verifyNovaPass(rawPass);
   if (!pass.valid) {
     return pass;
+  }
+  if (!pass.academia) {
+    console.warn("[acceso nova] Pase sin módulo de la Academia.");
+    return { valid: false, error: NOVA_ONLY_ACADEMIA_ERROR };
   }
 
   const code = buildNovaAccessCode(pass.sub);
@@ -4568,7 +4630,12 @@ async function startNovaAccessSession(rawPass, rawSessionId) {
   }
 
   console.log(`[acceso nova] Ingreso desde Nova School a ${pass.tutorPrefix}.`);
-  return { ...result, student: { name: pass.name, grade: pass.grade }, academia: pass.academia };
+  return {
+    ...result,
+    student: { name: pass.name, grade: pass.grade },
+    academia: pass.academia,
+    academiaToken: signAcademiaToken(pass.academia, code)
+  };
 }
 
 function validateTutorAccessCode(rawCode) {

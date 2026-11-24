@@ -152,6 +152,27 @@ const ACCESS_STORAGE_KEY = "innovaTutorAccessCode";
 const ACCESS_SESSION_STORAGE_KEY = "innovaTutorAccessSessionId";
 // Contexto del módulo de la Academia de Nova School (por pestaña).
 const NOVA_ACADEMIA_STORAGE_KEY = "novaAcademiaContext";
+// Vista compacta dentro de Nova School (?embed=1): solo la conversación, sin portada ni formulario lateral.
+const NOVA_EMBED = (() => {
+  try {
+    if (new URLSearchParams(window.location.search).get("embed") === "1") {
+      window.sessionStorage.setItem("novaEmbed", "1");
+    }
+    return window.sessionStorage.getItem("novaEmbed") === "1";
+  } catch (_error) {
+    return false;
+  }
+})();
+if (NOVA_EMBED) {
+  document.documentElement.classList.add("nova-embed");
+}
+
+// Avisa a Nova School (la página que contiene al profesor) que la sesión terminó.
+function notifyNovaParent(type) {
+  if (NOVA_EMBED && window.parent !== window) {
+    window.parent.postMessage({ source: "nova-tutor", type }, "*");
+  }
+}
 const DEFAULT_ACCESS_RECOVERY_URL = "https://innova-school-panel.onrender.com/entrar";
 
 // El código se recuerda en este dispositivo (localStorage) para que el estudiante vuelva a entrar
@@ -165,6 +186,9 @@ function readStoredAccessCode() {
 }
 
 function rememberAccessCode(code) {
+  if (/-NOVA-[0-9A-F]{20}$/i.test(String(code || ""))) {
+    return;
+  }
   try {
     window.localStorage.setItem(ACCESS_STORAGE_KEY, code);
   } catch (_error) {
@@ -549,15 +573,18 @@ async function validateAccessCode(rawCode, showErrors) {
 
 // Contexto de la Academia: el tema y la meta del módulo llenan los campos de la clase, y el modo de ayuda
 // arranca según la sección (práctica → paso a paso). Se guarda por pestaña para que sobreviva a recargar.
-function applyNovaAcademia(academia, isNewEntry) {
+function applyNovaAcademia(academia, isNewEntry, token) {
   state.academia = academia && academia.titulo ? academia : null;
+  if (token !== undefined) {
+    state.academiaToken = token || "";
+  }
   if (!state.academia) {
     if (isNewEntry) {
       window.sessionStorage.removeItem(NOVA_ACADEMIA_STORAGE_KEY);
     }
     return;
   }
-  window.sessionStorage.setItem(NOVA_ACADEMIA_STORAGE_KEY, JSON.stringify(state.academia));
+  window.sessionStorage.setItem(NOVA_ACADEMIA_STORAGE_KEY, JSON.stringify({ ...state.academia, token: state.academiaToken || "" }));
   if (elements.topic) {
     elements.topic.value = state.academia.titulo;
   }
@@ -575,7 +602,7 @@ function applyNovaAcademia(academia, isNewEntry) {
 function restoreNovaAcademia() {
   try {
     const stored = JSON.parse(window.sessionStorage.getItem(NOVA_ACADEMIA_STORAGE_KEY) || "null");
-    applyNovaAcademia(stored, false);
+    applyNovaAcademia(stored, false, stored?.token || "");
   } catch (_error) {
     window.sessionStorage.removeItem(NOVA_ACADEMIA_STORAGE_KEY);
   }
@@ -613,7 +640,7 @@ async function enterWithNovaPass(pass) {
     if (data.student?.grade && elements.gradeLevel) {
       elements.gradeLevel.value = data.student.grade;
     }
-    applyNovaAcademia(data.academia || null, true);
+    applyNovaAcademia(data.academia || null, true, data.academiaToken || "");
     hideAccessGate();
     setChatLocked(false);
     return true;
@@ -816,7 +843,7 @@ function getSessionContext() {
     difficulty: "media",
     help_mode: state.helpMode,
     language: "es",
-    ...(state.academia ? { academia: state.academia } : {})
+    ...(state.academiaToken ? { academia_token: state.academiaToken } : {})
   };
 }
 
@@ -916,6 +943,7 @@ function closeAvatarSession() {
     state.recognition?.stop();
   }
   showSessionAlert("Sesión finalizada", "Se agotaron los 15 minutos. El avatar se ha cerrado.");
+  notifyNovaParent("session-ended");
 }
 
 function showSessionAlert(title, text) {

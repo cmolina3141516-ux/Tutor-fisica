@@ -1446,3 +1446,78 @@ body:not(.app-loading) .shell {
   border-radius: 999px;
   font-weight: 700;
 }
+
+
+/* Vista compacta dentro de Nova School (?embed=1): solo la conversación con el profesor. */
+html.nova-embed body {
+  background: #ffffff;
+  min-height: 0;
+}
+
+html.nova-embed .shell {
+  width: 100%;
+  margin: 0;
+  gap: 0;
+}
+
+html.nova-embed .hero,
+html.nova-embed .sidebar,
+html.nova-embed .access-help {
+  display: none;
+}
+
+html.nova-embed .workspace {
+  grid-template-columns: 1fr;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+html.nova-embed .chat-panel {
+  padding: 12px 14px;
+}
+
+html.nova-embed .messages {
+  max-height: none;
+  min-height: 200px;
+  height: calc(100vh - 330px);
+}
+
+html.nova-embed .chat-head,
+html.nova-embed .composer-actions .helper {
+  display: none;
+}
+
+html.nova-embed .composer {
+  padding-top: 10px;
+}
+
+html.nova-embed .composer-submit-row {
+  margin-top: 8px;
+}
+
+html.nova-embed button[type="submit"] {
+  width: auto;
+}
+
+html.nova-embed .composer-actions,
+html.nova-embed .composer-buttons,
+html.nova-embed .voice-controls,
+html.nova-embed .voice-select-wrap {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  width: auto;
+  gap: 6px;
+}
+
+html.nova-embed .attach-button {
+  width: auto;
+  padding: 7px 11px;
+  font-size: 0.82rem;
+}
+
+html.nova-embed .voice-status {
+  width: auto;
+}
