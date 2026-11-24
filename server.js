@@ -50,6 +50,7 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
   ".svg": "image/svg+xml"
 };
 
@@ -685,6 +686,10 @@ function getSubjectLabel(subjectMode) {
         ? "Ciencias Naturales y Química"
         : subjectMode === "languages"
           ? "Inglés y Francés"
+        : subjectMode === "technology"
+          ? "Tecnología, Programación y Robótica"
+        : subjectMode === "critical_reading"
+          ? "Lectura Crítica y Filosofía"
         : "Física y Matemáticas";
 }
 
@@ -699,6 +704,10 @@ function buildSubjectImagePrompt({ subjectMode, prompt, gradeLevel }) {
         ? "Infografía o diagrama científico escolar, claro, ordenado, factual, estilo libro de ciencias naturales o química, con flechas, etiquetas, símbolos químicos correctos y procesos bien definidos."
         : subjectMode === "physics"
           ? "Diagrama o ilustración educativa de física, limpio, técnico, con ejes, flechas, símbolos y etiquetas claras, estilo libro escolar."
+        : subjectMode === "technology"
+          ? "Diagrama técnico escolar claro: diagrama de flujo, esquema de circuito o de robot, partes de un sistema o prototipo, con etiquetas legibles y estilo de libro de tecnología."
+        : subjectMode === "critical_reading"
+          ? "Esquema o mapa conceptual escolar claro: estructura de un texto, argumento con tesis y razones, línea de tiempo de filósofos o comparación de ideas, con etiquetas legibles."
           : "Infografía o esquema matemático limpio, exacto, con ejes, escalas, rótulos y composición de libro escolar.";
 
   return [
@@ -2624,9 +2633,12 @@ function buildStudentContext(session) {
           ? "Ciencias naturales y química"
           : subjectMode === "languages"
             ? "Inglés y francés"
+          : subjectMode === "technology"
+            ? "Tecnología, programación y robótica"
+          : subjectMode === "critical_reading"
+            ? "Lectura crítica y filosofía"
         : "Fisica general";
   const lines = [
-    `Nombre del estudiante: ${session.student_name || "No indicado"}`,
     `Grado: ${session.grade_level || "Bachillerato"}`,
     `Tema: ${session.topic || defaultTopic}`,
     `Objetivo: ${session.learning_goal || "Comprender el tema consultado"}`,
@@ -3229,6 +3241,18 @@ function shouldAskForClarification({ message, subjectMode }) {
     );
   }
 
+  if (subjectMode === "technology") {
+    return /programacion|algoritmo|robotica|python|scratch|arduino|circuito|sensor|tecnologia|variable|bucle|condicional/.test(
+      normalized
+    );
+  }
+
+  if (subjectMode === "critical_reading") {
+    return /lectura|texto|argumento|filosofia|etica|logica|ensayo|inferencia|tesis|falacia|metafisica|epistemologia/.test(
+      normalized
+    );
+  }
+
   return /energia|fuerza|fluido|termodinamica|aceleracion|movimiento|ondas|electricidad|magnetismo|gravitacion|presion/.test(
     normalized
   );
@@ -3245,6 +3269,10 @@ function buildClarificationReply({ message, subjectMode }) {
           ? "ciencias naturales y química"
           : subjectMode === "languages"
             ? "inglés y francés"
+          : subjectMode === "technology"
+            ? "tecnología, programación y robótica"
+          : subjectMode === "critical_reading"
+            ? "lectura crítica y filosofía"
           : "física";
 
   const safeTopic = topic || `ese tema de ${subjectName}`;
@@ -3856,6 +3884,10 @@ function buildTutorConfig() {
           ? "Profesor Andrés"
           : subjectMode === "languages"
             ? "Miss Emily"
+          : subjectMode === "technology"
+            ? "Profesor Felipe"
+          : subjectMode === "critical_reading"
+            ? "Profesor Mateo"
         : "Profesor Julián");
 
   if (subjectMode === "mathematics") {
@@ -4036,6 +4068,94 @@ function buildTutorConfig() {
     };
   }
 
+  if (subjectMode === "technology") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "Tecnología, Programación y Robótica",
+      pageTitle: "Tutor de Tecnología, Programación y Robótica",
+      heroEyebrow: "Tutor IA de Tecnología, Programación y Robótica",
+      heroLead:
+        "Proyectos STEAM, pensamiento computacional, programación por bloques y en Python, robótica escolar, prototipos y retos de innovación, explicados paso a paso.",
+      heroQuoteText:
+        '"Programar y construir es aprender a resolver problemas: se piensa, se prueba, se falla, se corrige y se vuelve a intentar."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN TECNOLOGÍA",
+      avatarUrl: process.env.AVATAR_URL || "/avatars/felipe.jpg",
+      avatarAlt: "Avatar del profesor de tecnología, programación y robótica",
+      chatEyebrow: "Aula interactiva",
+      timerKicker: "Tiempo de trabajo",
+      timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+      topicLabel: "Tema",
+      goalLabel: "Objetivo",
+      defaultTopic: "Programación y robótica",
+      defaultLearningGoal: "Comprender el tema y construir o programar paso a paso",
+      messagePlaceholder: "Escribe tu duda de tecnología, programación o robótica aquí...",
+      helperText:
+        "Consejo: pide explicar un algoritmo, revisar tu código, ideas para un proyecto o prototipo, o un quiz rápido.",
+      subjectMode,
+      voicePreference: getTutorVoiceGender("male"),
+      voiceLanguages: ["es"],
+      welcomeMessage:
+        "Hola soy el profesor Felipe. Puedo ayudarte con pensamiento computacional, programación, robótica escolar, proyectos STEAM y prototipos. Este tutor trabaja solo dentro de estas áreas.",
+      suggestedPrompts: [
+        "Explícame qué es un algoritmo con un ejemplo de la vida diaria",
+        "Ayúdame a hacer un juego sencillo en Scratch paso a paso",
+        "Explícame variables, condicionales y bucles en Python",
+        "Revisa mi código de Python y dime dónde está el error",
+        "Dame una idea de proyecto STEAM para mi colegio",
+        "Explícame cómo funciona un sensor de distancia en Arduino",
+        "Hazme un quiz rápido sobre pensamiento computacional",
+        "Ayúdame a planear un prototipo con materiales reciclados",
+        "Explícame qué es la inteligencia artificial para 9°",
+        "Diseñemos el diagrama de flujo de un semáforo"
+      ]
+    };
+  }
+
+  if (subjectMode === "critical_reading") {
+    return {
+      schoolName,
+      tutorName,
+      subjectName: "Lectura Crítica y Filosofía",
+      pageTitle: "Tutor de Lectura Crítica y Filosofía",
+      heroEyebrow: "Tutor IA de Lectura Crítica y Filosofía",
+      heroLead:
+        "Comprensión profunda de textos, argumentación, análisis de ideas, debates filosóficos y preparación para la prueba de Lectura Crítica del Saber 11.",
+      heroQuoteText:
+        '"Leer de verdad es dialogar con el texto: entender lo que dice, descubrir lo que supone y decidir con argumentos si estamos de acuerdo."',
+      heroQuoteAuthor: "VIRTUAL PLANET EDUCACIÓN EN LECTURA CRÍTICA Y FILOSOFÍA",
+      avatarUrl: process.env.AVATAR_URL || "/avatars/mateo.jpg",
+      avatarAlt: "Avatar del profesor de lectura crítica y filosofía",
+      chatEyebrow: "Aula interactiva",
+      timerKicker: "Tiempo de trabajo",
+      timerHint: "Dispones de 15 minutos para trabajar con el avatar.",
+      topicLabel: "Tema",
+      goalLabel: "Objetivo",
+      defaultTopic: "Lectura crítica y argumentación",
+      defaultLearningGoal: "Comprender el texto, identificar ideas y argumentar con claridad",
+      messagePlaceholder: "Escribe tu duda o pega el texto que quieres analizar aquí...",
+      helperText:
+        "Consejo: pega un texto para analizarlo, pide identificar la tesis, revisar tu ensayo o un quiz tipo Saber 11.",
+      subjectMode,
+      voicePreference: getTutorVoiceGender("male"),
+      voiceLanguages: ["es"],
+      welcomeMessage:
+        "Hola soy el profesor Mateo. Puedo ayudarte a comprender textos a fondo, argumentar mejor, analizar ideas filosóficas y prepararte para Lectura Crítica. Este tutor trabaja solo dentro de estas áreas.",
+      suggestedPrompts: [
+        "Ayúdame a encontrar la idea principal de este texto",
+        "Explícame la diferencia entre tesis, argumento y conclusión",
+        "Revisa mi ensayo argumentativo y dime cómo mejorarlo",
+        "Explícame qué es una falacia con ejemplos cotidianos",
+        "Hazme un quiz tipo Saber 11 de Lectura Crítica",
+        "Explícame el mito de la caverna de Platón para 10°",
+        "Ayúdame a preparar un debate sobre un dilema ético",
+        "Explícame qué es inferir y cómo hacerlo en una lectura",
+        "Compara a Sócrates, Platón y Aristóteles de forma sencilla",
+        "Enséñame a leer una caricatura o una infografía con sentido crítico"
+      ]
+    };
+  }
+
   const hybridPhysicsMathTutor = getSubjectMode() === "physics";
 
   return {
@@ -4106,6 +4226,12 @@ function getSubjectMode() {
   }
   if (["languages", "language", "idiomas", "ingles", "inglés", "frances", "francés", "english", "french"].includes(value) || tutorName.includes("emily")) {
     return "languages";
+  }
+  if (["technology", "tecnologia", "tecnología", "programacion", "programación", "robotica", "robótica"].includes(value) || tutorName.includes("felipe")) {
+    return "technology";
+  }
+  if (["critical_reading", "lectura", "lectura_critica", "lectura crítica", "lectura critica", "filosofia", "filosofía"].includes(value) || tutorName.includes("mateo")) {
+    return "critical_reading";
   }
   return "physics";
 }
@@ -4454,12 +4580,17 @@ async function startSupabaseAccessSession(rawCode, rawSessionId) {
     is_active: true
   });
 
+  const recordGrade = String(baseValidation.record?.grade || "").match(/\b(6|7|8|9|10|11)\b/);
   return {
     valid: true,
     code: baseValidation.code,
     sessionId,
     tutorPrefix: baseValidation.tutorPrefix,
-    limits: buildSupabaseLimitSummary(nextUsage, limits, now)
+    limits: buildSupabaseLimitSummary(nextUsage, limits, now),
+    student: {
+      name: String(baseValidation.record?.student_name || "").trim().split(/\s+/)[0].slice(0, 40),
+      grade: recordGrade ? recordGrade[1] : ""
+    }
   };
 }
 
@@ -4756,6 +4887,12 @@ function getTutorAccessPrefix() {
   }
 
   const subjectMode = getSubjectMode();
+  if (subjectMode === "technology") {
+    return "FELIPE";
+  }
+  if (subjectMode === "critical_reading") {
+    return "MATEO";
+  }
   if (subjectMode === "mathematics") {
     return "ESTEBAN";
   }

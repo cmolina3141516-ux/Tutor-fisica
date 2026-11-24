@@ -461,6 +461,12 @@ async function validateAccessCode(rawCode, showErrors) {
 
     state.accessGranted = true;
     state.accessCode = data.code || code;
+    if (data.student?.name && elements.studentName && !elements.studentName.value.trim()) {
+      elements.studentName.value = data.student.name;
+    }
+    if (data.student?.grade && elements.gradeLevel) {
+      elements.gradeLevel.value = data.student.grade;
+    }
     state.accessSessionId = data.sessionId || state.accessSessionId;
     window.sessionStorage.setItem(ACCESS_STORAGE_KEY, state.accessCode);
     if (state.accessSessionId) {
@@ -581,6 +587,23 @@ function setChatLocked(isLocked) {
   }
 }
 
+// El profesor llama al estudiante por su primer nombre solo en el saludo inicial.
+// En las respuestas siguientes no lo usa (el nombre ni siquiera se envía a OpenAI).
+function personalizeWelcome(message) {
+  const firstName = String(elements.studentName?.value || "").trim().split(/\s+/)[0];
+  if (!firstName) {
+    return message;
+  }
+  const name = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+  if (/^Hello,?\s+I am\b/i.test(message)) {
+    return message.replace(/^Hello,?\s+I am\b/i, `Hello, ${name}! I am`);
+  }
+  if (/^Hola,?\s+soy\b/i.test(message)) {
+    return message.replace(/^Hola,?\s+soy\b/i, `Hola, ${name}. Soy`);
+  }
+  return `Hola, ${name}. ${message}`;
+}
+
 function startTutorSession(config) {
   if (state.tutorSessionStarted) {
     return;
@@ -591,8 +614,10 @@ function startTutorSession(config) {
 
   appendMessage(
     "assistant",
-    config.welcomeMessage ||
-      `Hola soy el ${state.tutorName}. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con ${state.subjectName}.`
+    personalizeWelcome(
+      config.welcomeMessage ||
+        `Hola soy el ${state.tutorName}. Puedo ayudarte con explicaciones claras, desarrollo de ejercicios y aclaración de dudas sobre todo lo relacionado con ${state.subjectName}.`
+    )
   );
 
   startSessionTimer();
@@ -688,7 +713,6 @@ async function askTutor(userText, attachments = []) {
 
 function getSessionContext() {
   return {
-    student_name: elements.studentName.value.trim(),
     grade_level: elements.gradeLevel.value,
     topic: elements.topic.value.trim(),
     learning_goal: elements.learningGoal.value.trim(),
@@ -1076,14 +1100,18 @@ function renderRichText(text) {
   const root = document.createElement("div");
   root.className = "rich-text";
 
-  const segments = splitRichTextSegments(latexToPlainText(String(text || "")));
+  // La limpieza de LaTeX/Markdown se aplica solo al texto, nunca dentro de los bloques de código
+  // (en Python, `# comentario`, `**` y `\n` son código válido).
+  const segments = splitRichTextSegments(String(text || ""));
   segments.forEach((segment) => {
     if (segment.type === "code") {
       root.appendChild(renderCodeBlock(segment.content));
       return;
     }
 
-    const blocks = segment.content
+    // Código en línea (`variable`): se muestra sin las comillas invertidas.
+    const blocks = latexToPlainText(segment.content)
+      .replace(/`([^`\n]+)`/g, "$1")
       .split(/\n\s*\n+/)
       .map((block) => block.replace(/\n+$/g, "").trim())
       .filter(Boolean);
@@ -1107,7 +1135,9 @@ function splitRichTextSegments(text) {
     if (match.index > lastIndex) {
       segments.push({ type: "text", content: normalized.slice(lastIndex, match.index) });
     }
-    segments.push({ type: "code", content: match[1].trimEnd() });
+    // Quita la etiqueta de lenguaje que a veces escribe el modelo (```python, ```cpp…).
+    const codeContent = match[1].replace(/^[ \t]*[A-Za-z][\w+#.-]{0,15}[ \t]*\n/, (tag) => (/^\s*(python|py|js|javascript|cpp|c\+\+|c|arduino|ino|java|html|css|bash|sh|json|text|txt|scratch|pseudocodigo|pseudocode)\s*$/i.test(tag) ? "" : tag));
+    segments.push({ type: "code", content: codeContent.replace(/^\s*\n/, "").trimEnd() });
     lastIndex = pattern.lastIndex;
   }
 
