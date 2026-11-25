@@ -4401,7 +4401,8 @@ const novaMemoryCodes = new Map(); // código Nova -> vence (ms), solo sin Supab
 const NOVA_PASS_ERROR = "Este enlace de Nova School ya venció o no es válido. Vuelve a Nova School y abre de nuevo a tu profesor.";
 
 function getNovaSecret() {
-  const secret = String(process.env.NOVA_TUTOR_SECRET || "");
+  // Se recortan espacios y saltos de línea: al pegar la clave en Render suelen colarse al final.
+  const secret = String(process.env.NOVA_TUTOR_SECRET || "").trim();
   return secret.length >= 32 ? secret : "";
 }
 
